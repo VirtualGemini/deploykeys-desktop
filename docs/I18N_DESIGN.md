@@ -5,7 +5,7 @@
 默认语言：**English (`en`)**；首发第二语言：**简体中文 (`zh`)**
 
 > 实现位置：所有词条与查找逻辑集中在 `crates/deploykeys-ui/src/i18n.rs`。
-> 语言偏好的持久化在原生侧（`deploykeys-gui`），前端经 IPC 命令
+> 语言偏好的持久化在原生侧（`deploykeys-app`），前端经 IPC 命令
 > `get_language` / `set_language` 读写。
 
 ---
@@ -162,7 +162,7 @@ settings.language
 | `get_language` | 前端 ← 原生 | 读取持久化的 `language`（`Option<String>`） |
 | `set_language` | 前端 → 原生 | 写入语言偏好（upsert 到 `app_settings`） |
 
-命令定义见 `deploykeys-gui/src/lib.rs`，前端封装见 `deploykeys-ui/src/api.rs`。
+命令定义见 `deploykeys-app/src/lib.rs`，前端封装见 `deploykeys-ui/src/api.rs`。
 
 ---
 

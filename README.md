@@ -72,7 +72,7 @@ make check
 deploykeys-desktop/
 ├── crates/
 │   ├── deploykeys-core/      # Core business logic (native, no UI deps)
-│   ├── deploykeys-gui/       # Tauri 2 native host (binary: `deploykeys`)
+│   ├── deploykeys-app/       # Tauri 2 native host (binary: `deploykeys`)
 │   └── deploykeys-ui/        # Leptos CSR frontend, built to wasm by Trunk
 ├── migrations/            # Database migrations (sqlx::migrate!)
 ├── tools/                 # Pinned Tailwind v4 standalone binary + installer
@@ -80,7 +80,7 @@ deploykeys-desktop/
 └── .github/workflows/     # CI (fmt, clippy, test, audit)
 ```
 
-The Tauri host (`deploykeys-gui`) opens the database and exposes a small IPC
+The Tauri host (`deploykeys-app`) opens the database and exposes a small IPC
 command surface that bridges to `deploykeys-core`. The webview (`deploykeys-ui`)
 is plain CSR wasm and never depends on `deploykeys-core` — it calls the IPC
 commands and receives purpose-built DTOs, so secrets (keyring references,

@@ -30,7 +30,7 @@ deploykeys-desktop/
 │   │   │   └── services/        # 业务服务层 (AuthService, KeyBindingService, TargetService)
 │   │   └── Cargo.toml
 │   │
-│   ├── deploykeys-gui/             # Tauri 2 原生宿主（二进制 `deploykeys`）
+│   ├── deploykeys-app/             # Tauri 2 原生宿主（二进制 `deploykeys`）
 │   │   ├── src/lib.rs           # IPC 命令面 + AppState + 事件循环
 │   │   ├── src/main.rs
 │   │   ├── tauri.conf.json      # Tauri 配置
@@ -124,7 +124,7 @@ deploykeys-desktop/
 │   │   │   └── services/        # Business service layer (AuthService, KeyBindingService, TargetService)
 │   │   └── Cargo.toml
 │   │
-│   ├── deploykeys-gui/             # Tauri 2 native host (binary: `deploykeys`)
+│   ├── deploykeys-app/             # Tauri 2 native host (binary: `deploykeys`)
 │   │   ├── src/lib.rs           # IPC command surface + AppState + event loop
 │   │   ├── tauri.conf.json      # Tauri configuration
 │   │   └── capabilities/        # Permission capabilities
@@ -159,7 +159,7 @@ deploykeys-desktop/
 
 #### 1.1 Initialize Workspace
 - Create Cargo.toml workspace configuration
-- Create crates/deploykeys-core and crates/deploykeys-gui sub-projects
+- Create crates/deploykeys-core and crates/deploykeys-app sub-projects
 - Configure shared dependencies and build settings
 - Configure target platforms: macOS (x86_64-apple-darwin, aarch64-apple-darwin) and Linux (x86_64-unknown-linux-gnu)
 
@@ -252,13 +252,13 @@ deploykeys-desktop/
 
 ### Phase 4: 基础 GUI (Week 5 周)
 
-GUI 分两侧：原生宿主（`deploykeys-gui`）暴露 IPC 命令并桥接 core；前端
+GUI 分两侧：原生宿主（`deploykeys-app`）暴露 IPC 命令并桥接 core；前端
 （`deploykeys-ui`，Leptos CSR/wasm）渲染界面并经 IPC 调用命令。应用启动直接进入
 主界面；GitHub 设备流登录从主界面顶栏按需触发，已端到端跑通；Repos/Targets/Keys/Forge
 当前为占位界面。
 
 #### 4.1 IPC 命令面 + 原生宿主
-**Implementation file**: `deploykeys-gui/src/lib.rs`
+**Implementation file**: `deploykeys-app/src/lib.rs`
 - `run()`：初始化数据库、注入 `AppState`、注册 IPC 命令、跑 Tauri 事件循环
 - `AppState`：持有 `Database`（managed state，注入每个命令）
 - 命令：`get_session` / `get_language` / `set_language` /
@@ -324,7 +324,7 @@ GIT_SSH_COMMAND="ssh -i <key_path> -o IdentitiesOnly=yes" \
   3. 更新 KeyBinding status 为 revoked
 
 #### 5.4 KeyBinding Detail 界面
-**Implementation file**: `deploykeys-ui/src/screens/binding_detail.rs`（前端）+ 对应 IPC 命令（`deploykeys-gui/src/lib.rs`）
+**Implementation file**: `deploykeys-ui/src/screens/binding_detail.rs`（前端）+ 对应 IPC 命令（`deploykeys-app/src/lib.rs`）
 - 显示 KeyBinding 完整信息
 - 状态指示器：Active (绿) / Drifted (黄) / Failed (红)
 - 按钮：Verify, Revoke, View Public Key
@@ -358,7 +358,7 @@ GIT_SSH_COMMAND="ssh -i <key_path> -o IdentitiesOnly=yes" \
   6. 返回 `RemoteKeyPair { algorithm, public_key, private_key_path }`
 
 #### 6.4 Target Manager 界面
-**Implementation file**: `deploykeys-ui/src/screens/target_manager.rs`（前端界面）+ `deploykeys-gui` 侧对应 IPC 命令
+**Implementation file**: `deploykeys-ui/src/screens/target_manager.rs`（前端界面）+ `deploykeys-app` 侧对应 IPC 命令
 - 列表显示所有 targets (Local + Remote)
 - "Add Remote Target" 按钮 → 弹出表单：
   - Alias (用户友好名称)
@@ -416,7 +416,7 @@ GIT_SSH_COMMAND="ssh -i <key_path> -o IdentitiesOnly=yes" \
 - `src/verification/mod.rs` - 验证 / 漂移语义
 - `migrations/{001_initial,002_settings}.sql` - 数据库 schema
 
-### 原生宿主 (deploykeys-gui，Tauri)
+### 原生宿主 (deploykeys-app，Tauri)
 
 - `src/main.rs` - 入口（调 `deploykeys_lib::run()`）
 - `src/lib.rs` - IPC 命令面 + DTO + AppState + 事件循环

@@ -33,7 +33,7 @@ deploykeys-desktop/
 │   │   │   └── lib.rs         # Crate 入口
 │   │   └── Cargo.toml         # （测试内联在 src/**/tests.rs）
 │   │
-│   ├── deploykeys-gui/           # Tauri 2 原生宿主（依赖 deploykeys-core）
+│   ├── deploykeys-app/           # Tauri 2 原生宿主（依赖 deploykeys-core）
 │   │   ├── src/
 │   │   │   ├── lib.rs         # IPC 命令面 + DTO + AppState + 事件循环
 │   │   │   └── main.rs        # 程序入口（调用 lib::run）

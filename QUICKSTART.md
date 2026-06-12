@@ -113,7 +113,7 @@ deploykeys-desktop/
 │   │   ├── keygen/            # Key 生成
 │   │   └── credentials/       # 凭据管理
 │   │
-│   ├── deploykeys-gui/           # Tauri 2 原生宿主（二进制 `deploykeys`）
+│   ├── deploykeys-app/           # Tauri 2 原生宿主（二进制 `deploykeys`）
 │   │   ├── src/lib.rs         # IPC 命令面 + AppState + 事件循环
 │   │   ├── tauri.conf.json    # Tauri 配置
 │   │   └── capabilities/      # 权限能力

@@ -1,10 +1,10 @@
 [workspace]
-members = ["crates/deploykeys-core", "crates/deploykeys-gui", "crates/deploykeys-ui"]
+members = ["crates/deploykeys-core", "crates/deploykeys-app", "crates/deploykeys-ui"]
 # The UI crate is CSR wasm, built by Trunk with --target wasm32-unknown-unknown.
 # Keeping it out of default-members means a bare `cargo build`/`cargo test` at
 # the root only touches the native crates (core + the Tauri backend), so the
 # wasm-only dependency tree never gets pulled into a host build.
-default-members = ["crates/deploykeys-core", "crates/deploykeys-gui"]
+default-members = ["crates/deploykeys-core", "crates/deploykeys-app"]
 resolver = "2"
 
 [workspace.package]

@@ -10,6 +10,8 @@ use deploykeys_core::github::{DeviceFlowClient, PollResult};
 use deploykeys_core::services::AuthService;
 use serde::Serialize;
 use tauri::{Manager, State};
+#[cfg(target_os = "macos")]
+use tauri_plugin_decorum::WebviewWindowExt;
 
 /// GitHub App client ID for the device flow (public information).
 /// Override with the `DEPLOYKEYS_GITHUB_CLIENT_ID` environment variable.
@@ -163,11 +165,37 @@ pub fn run() {
         .init();
 
     tauri::Builder::default()
+        .plugin(tauri_plugin_decorum::init())
         .setup(|app| {
             // Open the database on the Tauri async runtime before the first
             // command can run, then stash it in managed state.
             let db = tauri::async_runtime::block_on(init_database())?;
             app.manage(AppState { db });
+
+            // macOS: the Overlay title bar pins the traffic lights to the
+            // top-left at the system default inset. decorum's `y` is NOT "pixels
+            // from the top": per its traffic.rs the button center ends up at
+            // `y/2 + 4 + BUTTON_HEIGHT/2` (AppKit logical points, same unit as
+            // our CSS px — independent of display scale). To center the lights
+            // in the header (mid-line = HEADER_HEIGHT/2), solve for y:
+            //     HEADER_HEIGHT/2 = y/2 + 4 + BUTTON_HEIGHT/2
+            //     y = HEADER_HEIGHT - 8 - BUTTON_HEIGHT
+            // We then nudge the button center up by 1px (subtract 2 from y, since
+            // y is halved). Keep HEADER_HEIGHT in sync with the UI header height;
+            // change it here when the header changes and the lights re-center.
+            #[cfg(target_os = "macos")]
+            {
+                /// UI header height in logical px (matches the `h-14` header).
+                const HEADER_HEIGHT: f32 = 56.0;
+                /// macOS traffic-light button height (logical points).
+                const BUTTON_HEIGHT: f32 = 12.0;
+                // Center, then shift up 1px (y/2 means -1px center == -2 in y).
+                let inset_y = HEADER_HEIGHT - 8.0 - BUTTON_HEIGHT - 2.0;
+
+                let window = app.get_webview_window("main").unwrap();
+                let _ = window.set_traffic_lights_inset(16.0, inset_y);
+            }
+
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![

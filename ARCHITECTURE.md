@@ -4,7 +4,7 @@
 
 ### 整体架构
 
-应用是一个 Tauri 2 桌面程序：原生宿主 crate（`deploykeys-gui`）持有所有
+应用是一个 Tauri 2 桌面程序：原生宿主 crate（`deploykeys-app`）持有所有
 业务能力，前端是独立的 Leptos CSR/wasm crate（`deploykeys-ui`），跑在
 webview 里。两者只通过 Tauri 的 IPC 命令桥通信，且只传脱敏 DTO——
 keyring 引用、token 等机密永不跨越 IPC 边界。
@@ -22,7 +22,7 @@ keyring 引用、token 等机密永不跨越 IPC 边界。
                            │  Tauri IPC（window.__TAURI__.core.invoke）
                            │  仅传脱敏 DTO，机密不过界
 ┌──────────────────────────┼───────────────────────────────┐
-│           deploykeys-gui (Tauri 原生宿主)                    │
+│           deploykeys-app (Tauri 原生宿主)                    │
 │  IPC 命令面：get_session / get_language / set_language /   │
 │  start_github_auth / poll_github_auth / open_url           │
 │  打开数据库、注入 AppState、桥接到 core                     │
@@ -94,7 +94,7 @@ let repos = db.query("SELECT * FROM repositories")?;
 
 ---
 
-### 2. 原生宿主层 (`deploykeys-gui`)
+### 2. 原生宿主层 (`deploykeys-app`)
 
 Tauri 2 宿主。产出名为 `deploykeys` 的二进制。负责打开数据库、把
 `AppState` 注入每个命令、注册 IPC 命令面、运行 Tauri 事件循环。

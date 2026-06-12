@@ -8,7 +8,7 @@
 
 ## 架构
 
-桌面端为 Tauri 2 应用：原生宿主 crate `deploykeys-gui`（二进制 `deploykeys`）持有
+桌面端为 Tauri 2 应用：原生宿主 crate `deploykeys-app`（二进制 `deploykeys`）持有
 所有后端能力，经 IPC 命令面桥接 `deploykeys-core`；前端是独立的 Leptos CSR/wasm
 crate `deploykeys-ui`，由 Trunk 构建、跑在 webview 里，仅通过 IPC 收发脱敏 DTO，
 机密永不跨界。`deploykeys-core` 在重构中原封不动。详见 [ARCHITECTURE.md](ARCHITECTURE.md)。

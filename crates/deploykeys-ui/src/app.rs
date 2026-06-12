@@ -176,60 +176,107 @@ fn Main(
     };
 
     view! {
-        <div class="min-h-screen w-full bg-bg text-content">
-            <header class="sticky top-0 inset-x-0 z-50 bg-surface border-b border-border">
-                <nav class="max-w-4xl mx-auto flex items-center justify-between px-6 h-14">
-                    <div class="flex items-center gap-1">
-                        <NavItem label=move || t("nav.repos") active=true />
-                        <NavItem label=move || t("nav.targets") active=false />
-                        <NavItem label=move || t("nav.keys") active=false />
-                        <NavItem label=move || t("nav.forge") active=false />
+        // Standard web-admin layout: a top title bar, then a body row split into
+        // a left sidebar (section nav) and a right content area.
+        //   ┌──────────────────────────────────────────┐
+        //   │ header (drag region, traffic lights)       │
+        //   ├───────────┬────────────────────────────────┤
+        //   │  sidebar  │  content                        │
+        //   └───────────┴────────────────────────────────┘
+        // `h-screen` + `overflow-hidden` pins the chrome; only the content
+        // column scrolls.
+        <div class="h-screen w-full bg-bg text-content flex flex-col overflow-hidden">
+            // macOS Overlay title bar: a full-width dark bar across the top edge.
+            // The window's traffic-light buttons float over its left side, so
+            // `pl-20` clears them. The whole bar is the window drag handle
+            // (`data-tauri-drag-region`); passive children get `pointer-events-none`
+            // so their clicks fall through to the drag region (the bar moves the
+            // window instead of selecting text), while real buttons keep pointer
+            // events and stay clickable.
+            <header
+                data-tauri-drag-region=""
+                class="flex items-center shrink-0 h-14 pl-20 pr-4 gap-3 bg-surface border-b border-border select-none"
+            >
+                // Brand: mark + product name, right next to the traffic lights.
+                <div class="flex items-center gap-2.5 pointer-events-none">
+                    <div class="flex items-center justify-center size-9 rounded-lg bg-primary text-on-primary shrink-0">
+                        <svg class="size-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" xmlns="http://www.w3.org/2000/svg">
+                            <circle cx="7.5" cy="15.5" r="4.5"></circle>
+                            <path d="M10.7 12.3 21 2"></path>
+                            <path d="m16 6 3 3"></path>
+                            <path d="m13 9 3 3"></path>
+                        </svg>
                     </div>
-                    <div class="flex items-center gap-3">
-                        {move || match account.get() {
-                            Some(acct) => view! {
-                                <span class="text-sm text-muted">{format!("@{}", acct.login)}</span>
-                                <button
-                                    type="button"
-                                    class="py-1.5 px-3 text-xs font-medium rounded-lg border border-border text-muted hover:bg-bg focus:outline-none transition-colors"
-                                    on:click=sign_out
-                                >
-                                    {move || t("common.sign_out")}
-                                </button>
-                            }.into_view(),
-                            None => view! {
-                                <button
-                                    type="button"
-                                    class="py-1.5 px-3 text-xs font-medium rounded-lg bg-primary text-on-primary hover:bg-primary-hover focus:outline-none disabled:opacity-50 disabled:pointer-events-none transition-colors"
-                                    prop:disabled=signing_in
-                                    on:click=move |_| on_sign_in.call(())
-                                >
-                                    {move || if signing_in.get() { t("welcome.signing_in") } else { t("welcome.sign_in") }}
-                                </button>
-                            }.into_view(),
-                        }}
-                    </div>
-                </nav>
+                    <span class="text-lg font-semibold leading-none text-content whitespace-nowrap">{move || t("app.brand")}</span>
+                </div>
+
+                // Flexible draggable gap. It carries `data-tauri-drag-region`
+                // itself: a child without the attribute (and without
+                // pointer-events-none) would otherwise swallow the drag and
+                // fall back to text selection instead of moving the window.
+                <div data-tauri-drag-region="" class="flex-1 self-stretch"></div>
+
+                // Right: signed-in identity + sign out, or a sign-in button.
+                <div class="flex items-center gap-3">
+                    {move || match account.get() {
+                        Some(acct) => view! {
+                            <span class="text-sm text-muted whitespace-nowrap pointer-events-none">{format!("@{}", acct.login)}</span>
+                            <button
+                                type="button"
+                                class="py-2 px-3 text-xs font-medium rounded-lg border border-border text-muted hover:bg-bg focus:outline-none transition-colors"
+                                on:click=sign_out
+                            >
+                                {move || t("common.sign_out")}
+                            </button>
+                        }.into_view(),
+                        None => view! {
+                            <button
+                                type="button"
+                                class="py-2 px-4 text-sm font-medium rounded-lg bg-primary text-on-primary hover:bg-primary-hover focus:outline-none disabled:opacity-50 disabled:pointer-events-none transition-colors"
+                                prop:disabled=signing_in
+                                on:click=move |_| on_sign_in.call(())
+                            >
+                                {move || if signing_in.get() { t("welcome.signing_in") } else { t("welcome.sign_in") }}
+                            </button>
+                        }.into_view(),
+                    }}
+                </div>
             </header>
-            <main class="max-w-4xl mx-auto px-6 py-12">
-                <h1 class="text-2xl font-semibold text-content">{move || t("nav.repos")}</h1>
-                <p class="mt-2 text-sm text-muted">{move || t("screen.placeholder_phase4")}</p>
-                <Show when=move || error.get().is_some()>
-                    <div class="w-full mt-4 p-3 text-sm rounded-lg border border-red-200 bg-red-50 text-red-700 text-left dark:border-red-900 dark:bg-red-950 dark:text-red-300">
-                        {move || error.get().unwrap_or_default()}
+
+            // Body: sidebar (left) + content (right).
+            <div class="flex-1 flex min-h-0">
+                // Left sidebar: vertical section nav.
+                <aside class="shrink-0 w-60 bg-surface border-r border-border flex flex-col py-3 px-2 gap-1 overflow-y-auto">
+                    <NavItem label=move || t("nav.repos") active=true />
+                    <NavItem label=move || t("nav.targets") active=false />
+                    <NavItem label=move || t("nav.keys") active=false />
+                    <NavItem label=move || t("nav.forge") active=false />
+                </aside>
+
+                // Right content area — the section content comes in a later phase.
+                <main class="flex-1 min-w-0 overflow-y-auto px-8 py-8">
+                    <div class="max-w-4xl mx-auto">
+                        <h1 class="text-2xl font-semibold text-content">{move || t("nav.repos")}</h1>
+                        <p class="mt-2 text-sm text-muted">{move || t("screen.placeholder_phase4")}</p>
+                        <Show when=move || error.get().is_some()>
+                            <div class="w-full mt-4 p-3 text-sm rounded-lg border border-red-200 bg-red-50 text-red-700 text-left dark:border-red-900 dark:bg-red-950 dark:text-red-300">
+                                {move || error.get().unwrap_or_default()}
+                            </div>
+                        </Show>
                     </div>
-                </Show>
-            </main>
+                </main>
+            </div>
         </div>
     }
 }
 
 #[component]
 fn NavItem(#[prop(into)] label: Signal<&'static str>, active: bool) -> impl IntoView {
+    // Sidebar item: full-width, left-aligned row (admin-panel style).
     let class = if active {
-        "py-1.5 px-3 text-sm font-medium rounded-lg bg-bg text-content"
+        "w-full flex items-center py-2 px-3 text-sm font-medium rounded-lg bg-primary-soft text-primary"
     } else {
-        "py-1.5 px-3 text-sm font-medium rounded-lg text-muted hover:bg-bg transition-colors"
+        "w-full flex items-center py-2 px-3 text-sm font-medium rounded-lg text-muted hover:bg-bg hover:text-content transition-colors"
     };
     view! { <button type="button" class=class>{move || label.get()}</button> }
 }
