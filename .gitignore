@@ -37,6 +37,7 @@
 
 # Standalone Tailwind CLI binary (download via tools/install-tailwind.sh)
 /tools/tailwindcss
+/tools/tailwindcss.partial
 
 # Testing
 .test/

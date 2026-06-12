@@ -36,27 +36,42 @@ case "$asset" in
 esac
 
 url="https://github.com/tailwindlabs/tailwindcss/releases/download/${VERSION}/${asset}"
-tmp="$(mktemp)"
-trap 'rm -f "$tmp"' EXIT
+# Resumable partial path next to DEST so a dropped connection can continue
+# rather than restart the 76 MB transfer. Kept on failure for the next run;
+# removed on success. Also gitignored (tools/tailwindcss*).
+part="$DEST.partial"
 
-echo "Downloading $asset ($VERSION)..."
-curl -fSL --no-progress-meter --proto '=https' --tlsv1.2 -o "$tmp" "$url"
+checksum() {
+    if command -v shasum >/dev/null 2>&1; then
+        shasum -a 256 "$1" | cut -d' ' -f1
+    else
+        sha256sum "$1" | cut -d' ' -f1
+    fi
+}
 
-echo "Verifying checksum..."
-if command -v shasum >/dev/null 2>&1; then
-    actual="$(shasum -a 256 "$tmp" | cut -d' ' -f1)"
-else
-    actual="$(sha256sum "$tmp" | cut -d' ' -f1)"
+# Skip the download entirely if a verified binary is already installed.
+if [ -f "$DEST" ] && [ "$(checksum "$DEST")" = "$sum" ]; then
+    echo "Tailwind CLI already installed and verified -> $DEST"
+    exit 0
 fi
 
+echo "Downloading $asset ($VERSION)..."
+# -C - resumes from the partial file; --retry rides out transient drops.
+curl -fSL --no-progress-meter --proto '=https' --tlsv1.2 \
+    --retry 5 --retry-delay 2 --retry-connrefused \
+    -C - -o "$part" "$url"
+
+echo "Verifying checksum..."
+actual="$(checksum "$part")"
 if [ "$actual" != "$sum" ]; then
     echo "checksum mismatch for $asset" >&2
     echo "  expected: $sum" >&2
     echo "  actual:   $actual" >&2
+    echo "removing corrupt download: $part" >&2
+    rm -f "$part"
     exit 1
 fi
 
-mv "$tmp" "$DEST"
-trap - EXIT
+mv "$part" "$DEST"
 chmod +x "$DEST"
 echo "Installed Tailwind CLI -> $DEST"
