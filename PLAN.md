@@ -16,9 +16,9 @@ DeployKeys Desktop 是一个从零开始的 GitHub Deploy Key 自动化配置工
 
 ```
 deploykeys-desktop/
-├── Cargo.toml                    # Workspace 根
+├── Cargo.toml                    # Workspace 根（default-members 排除 wasm-only 的 ui crate）
 ├── crates/
-│   ├── deploykeys-core/            # 核心业务逻辑库（无 UI 依赖）
+│   ├── deploykeys-core/            # 核心业务逻辑库（原生，无 UI 依赖）
 │   │   ├── src/
 │   │   │   ├── models/          # 数据模型 (Account, Target, KeyBinding, Repository)
 │   │   │   ├── db/              # SQLite 数据访问层
@@ -27,29 +27,41 @@ deploykeys-desktop/
 │   │   │   ├── keygen/          # SSH Key 生成 (本地: ssh-key crate, 远程: ssh-keygen)
 │   │   │   ├── credentials/     # 系统凭据管理 (keyring crate)
 │   │   │   ├── verification/    # 验证逻辑 (git ls-remote 测试)
-│   │   │   └── services/        # 业务服务层 (KeyForgeService, VerificationService)
+│   │   │   └── services/        # 业务服务层 (AuthService, KeyBindingService, TargetService)
 │   │   └── Cargo.toml
 │   │
-│   └── deploykeys-gui/             # Iced GUI 应用
-│       ├── src/
-│       │   ├── main.rs
-│       │   ├── app.rs           # Iced Application 主状态机
-│       │   ├── screens/         # 各界面 (Welcome, Auth, RepoList, KeyForge, Detail)
-│       │   └── messages.rs      # Iced Message 枚举
+│   ├── deploykeys-gui/             # Tauri 2 原生宿主（二进制 `deploykeys`）
+│   │   ├── src/lib.rs           # IPC 命令面 + AppState + 事件循环
+│   │   ├── src/main.rs
+│   │   ├── tauri.conf.json      # Tauri 配置
+│   │   ├── capabilities/        # 权限能力
+│   │   └── Cargo.toml
+│   │
+│   └── deploykeys-ui/              # Leptos CSR 前端（Trunk 构建为 wasm）
+│       ├── src/app.rs          # 根组件、屏幕状态、设备流轮询
+│       ├── src/api.rs          # IPC 命令的前端视图（本地 DTO）
+│       ├── src/tauri.rs        # IPC invoke 桥
+│       ├── src/i18n.rs         # 内联词条表 + 响应式 locale
+│       ├── src/screens/        # 各界面 (Welcome, OAuth, …)
+│       ├── styles/             # Tailwind 输入/输出 CSS
+│       ├── Trunk.toml
 │       └── Cargo.toml
 ├── migrations/                   # SQLite schema 迁移
-└── assets/                       # 图标、资源
+└── tools/                        # 固定的 Tailwind v4 standalone 二进制 + 安装脚本
 ```
 
 ### 技术栈
 
-- **GUI**: Iced 0.13+ (纯 Rust，支持 macOS/Linux)
+- **桌面壳**: Tauri 2 (原生宿主 + webview)
+- **前端**: Leptos 0.6 (CSR/wasm)，Trunk 构建
+- **样式**: Tailwind v4 (tools/ 下固定 standalone 二进制，无 Node 依赖)，组件风格抄自 Preline
+- **前后端通信**: Tauri IPC（`window.__TAURI__.core.invoke`），仅传脱敏 DTO
 - **HTTP**: reqwest + rustls
 - **SSH**: russh (优先) 或 ssh 命令 fallback
 - **数据库**: SQLx + SQLite (异步)
 - **凭据**: keyring (macOS Keychain/Linux Secret Service)
 - **SSH Key**: ssh-key crate (支持 Ed25519, RSA, ECDSA 算法选择)
-- **国际化**: rust-i18n (编译期内嵌 `locales/{en,zh}.yml`)，默认英文
+- **国际化**: ui crate 内 `i18n.rs` 内联词条表 + Leptos 响应式 `RwSignal`，默认英文（详见 docs/I18N_DESIGN.md）
 
 ---
 
@@ -62,17 +74,15 @@ deploykeys-desktop/
 设计详见 [`docs/I18N_DESIGN.md`](docs/I18N_DESIGN.md)。要点：
 
 - **默认语言 English**；首发支持 `en` / `zh`。运行时可切换，无需重启。
-- **所有用户可见文案必须走词条**：`crates/deploykeys-gui/locales/{en,zh}.yml` + `t!("key")`。
-  GUI 代码中**禁止硬编码面向用户的字符串**（含错误提示）。品牌名 `app.brand` 也入词条。
-- **`deploykeys-core` 不做本地化**：核心层只返回稳定的英文技术错误；GUI 负责呈现，
-  用「已本地化前缀词条 + `%{detail}` 原始技术细节」的方式组合（细节保留英文，便于排查）。
-- **键集一致性由测试强制**：`crates/deploykeys-gui/tests/i18n_keys.rs` 断言各语言键集与
-  `%{...}` 占位符完全一致；新增键必须同时补齐所有语言文件，否则 CI 失败。
-- **新增语言**：加 `locales/<code>.yml`（键集对齐 en）+ 在 `i18n::Locale` 注册即可。
-- **CJK 字体**：`main.rs` 已将默认字体设为 PingFang SC（macOS）/ Noto Sans CJK SC（Linux），
-  避免中文豆腐块；新窗口/自定义字体不得回退到无 CJK 字形的字体。
-- 语言偏好持久化在 `app_settings` 表（迁移 `002_settings.sql`），启动顺序：
-  持久化选择 → 系统语言 → 英文兜底。
+- **所有用户可见文案必须走词条**：前端 `crates/deploykeys-ui/src/i18n.rs` 内联词条表
+  （`EN`/`ZH` 静态数组）+ `t("key")`。前端代码中**禁止硬编码面向用户的字符串**
+  （含错误提示）。品牌名 `app.brand` 也入词条。
+- **`deploykeys-core` 不做本地化**：核心层只返回稳定的英文技术错误；前端负责呈现。
+  IPC 命令以 `Result<_, String>` 形式回传错误字符串，前端展示在对应界面。
+- **新增语言**：在 `i18n.rs` 加一张词条数组（键集对齐 `EN`）+ 在 `Locale` 枚举注册。
+- **CJK 字体**：webview 走系统字体栈，由 OS 提供中文字形；无需应用内嵌字体。
+- 语言偏好持久化在 `app_settings` 表（迁移 `002_settings.sql`），由原生命令
+  `get_language` / `set_language` 读写。启动顺序：持久化选择 → webview 语言 → 英文兜底。
 
 ---
 
@@ -86,7 +96,7 @@ deploykeys-desktop/
 
 **Core Value**: Target-based key generation, repository authorization, private keys never leave the environment
 
-**Tech Stack**: Rust + Iced (GUI) + SQLite + SQLx
+**Tech Stack**: Rust + Tauri 2 (desktop shell) + Leptos/wasm (frontend) + SQLite + SQLx
 
 **Scope**: macOS and Linux support only (no Windows in MVP)
 
@@ -111,23 +121,29 @@ deploykeys-desktop/
 │   │   │   ├── keygen/          # SSH key generation (local: ssh-key crate, remote: ssh-keygen)
 │   │   │   ├── credentials/     # System credential management (keyring crate)
 │   │   │   ├── verification/    # Verification logic (git ls-remote test)
-│   │   │   └── services/        # Business service layer (KeyForgeService, VerificationService)
+│   │   │   └── services/        # Business service layer (AuthService, KeyBindingService, TargetService)
 │   │   └── Cargo.toml
 │   │
-│   └── deploykeys-gui/             # Iced GUI application
-│       ├── src/
-│       │   ├── main.rs
-│       │   ├── app.rs           # Iced Application main state machine
-│       │   ├── screens/         # UI screens (Welcome, Auth, RepoList, KeyForge, Detail)
-│       │   └── messages.rs      # Iced Message enum
-│       └── Cargo.toml
+│   ├── deploykeys-gui/             # Tauri 2 native host (binary: `deploykeys`)
+│   │   ├── src/lib.rs           # IPC command surface + AppState + event loop
+│   │   ├── tauri.conf.json      # Tauri configuration
+│   │   └── capabilities/        # Permission capabilities
+│   │
+│   └── deploykeys-ui/             # Leptos CSR frontend, built to wasm by Trunk
+│       ├── src/app.rs          # Root component, screen state, device-flow polling
+│       ├── src/tauri.rs        # IPC invoke bridge
+│       ├── src/i18n.rs         # Inline string table + reactive locale
+│       ├── src/screens/        # Welcome / OAuth screens
+│       └── styles/             # Tailwind input/output CSS
 ├── migrations/                   # SQLite schema migrations
-└── assets/                       # Icons, resources
+└── tools/                        # Pinned Tailwind v4 standalone binary
 ```
 
 ### Technology Stack
 
-- **GUI**: Iced 0.13+ (Pure Rust, supports macOS/Linux)
+- **Desktop shell**: Tauri 2 (native host; webview frontend over IPC)
+- **Frontend**: Leptos 0.6 (CSR/wasm), built by Trunk
+- **Styling**: Tailwind v4 (pinned standalone binary in `tools/`, no Node toolchain); Preline-style utility classes
 - **HTTP**: reqwest + rustls
 - **SSH**: russh (priority) or ssh command fallback
 - **Database**: SQLx + SQLite (async)
@@ -221,57 +237,57 @@ deploykeys-desktop/
 - `DeployKeyApi::list()`: GET /repos/{owner}/{repo}/keys
 - `DeployKeyApi::delete()`: DELETE /repos/{owner}/{repo}/keys/{key_id}
 
-#### 3.4 Key Forge 服务
-**Implementation file**: `deploykeys-core/src/services/key_forge.rs`
-- `KeyForgeService::create_binding()`: 完整流程
+#### 3.4 Key 绑定服务
+**Implementation file**: `deploykeys-core/src/services/key_binding_service.rs`
+- `KeyBindingService::create_binding()`: 完整流程
   1. 检查 repo × target 唯一性
   2. 生成本地 key
   3. 调用 GitHub API 创建 Deploy Key
   4. 保存 KeyBinding 到数据库
   5. 返回 KeyBinding 对象
+- 补偿语义：上传失败清理本地私钥；落库失败回滚已创建的 GitHub key
 
 ---
 
 ### Phase 4: 基础 GUI (Week 5 周)
 
-#### 4.1 Iced 应用骨架
-**Implementation file**: `deploykeys-gui/src/app.rs`
-- `DeployKeysApp` 结构体：持有 current_screen 和 AppState
-- `AppState`：持有 Database, GitHubClient, 当前账号、仓库列表等
-- `Message` 枚举：定义所有用户交互消息
+GUI 分两侧：原生宿主（`deploykeys-gui`）暴露 IPC 命令并桥接 core；前端
+（`deploykeys-ui`，Leptos CSR/wasm）渲染界面并经 IPC 调用命令。Welcome 与
+OAuth 设备流已落地端到端跑通；Repos/Targets/Keys/Forge 当前为占位界面。
 
-#### 4.2 Welcome 界面
-**Implementation file**: `deploykeys-gui/src/screens/welcome.rs`
-- 显示 DeployKeys logo 和介绍
-- "Sign in with GitHub" 按钮 → 触发 `Message::StartGitHubAuth`
+#### 4.1 IPC 命令面 + 原生宿主
+**Implementation file**: `deploykeys-gui/src/lib.rs`
+- `run()`：初始化数据库、注入 `AppState`、注册 IPC 命令、跑 Tauri 事件循环
+- `AppState`：持有 `Database`（managed state，注入每个命令）
+- 命令：`get_session` / `get_language` / `set_language` /
+  `start_github_auth` / `poll_github_auth` / `open_url`
+- 跨边界只用脱敏 DTO（`AccountDto`/`DeviceCodeDto`/`PollDto`），机密不外泄
 
-#### 4.3 GitHub Auth 界面
-**Implementation file**: `deploykeys-gui/src/screens/auth.rs`
-- 显示 device code 和授权链接
-- 显示二维码（可选）
-- 轮询状态：Polling → Success → 跳转到 Repository List
+#### 4.2 前端根组件 + IPC 桥
+**Implementation file**: `deploykeys-ui/src/app.rs` + `src/tauri.rs` + `src/api.rs`
+- `App`：持有屏幕状态（`Welcome` / `OAuth` / `Repos`）的 `RwSignal`
+- `tauri.rs`：绑定 `window.__TAURI__.core.invoke`，无 Tauri Rust 依赖
+- `api.rs`：镜像命令签名 + 本地 DTO，反序列化命令结果
 
-#### 4.4 Repository List 界面
-**Implementation file**: `deploykeys-gui/src/screens/repo_list.rs`
-- 列表显示所有可访问仓库
-- 每个仓库显示：owner/name, private 标记, 已绑定 targets
-- 点击仓库 → 跳转到 Key Forge 界面
+#### 4.3 Welcome 界面
+**Implementation file**: `deploykeys-ui/src/screens/welcome.rs`
+- 显示品牌、标语与 "Sign in with GitHub" 按钮
+- 点击 → `api::start_github_auth()`，进入 OAuth 屏并启动轮询
 
-#### 4.5 Key Forge 界面
-**Implementation file**: `deploykeys-gui/src/screens/key_forge.rs`
-- Repository picker (预选)
-- Target picker: "Local Machine"
-- Algorithm selector: Ed25519 (默认) / RSA 2048 / RSA 4096 / ECDSA P-256
-- Permission toggle: Read-only (默认) / Read-write (显示警告)
-- Key title 输入框
-- "Generate & Bind" 按钮 → 触发 `Message::CreateBinding`
-- 显示执行计划预览
+#### 4.4 OAuth 设备流界面
+**Implementation file**: `deploykeys-ui/src/screens/oauth.rs`
+- 展示 verification URL 与 user code，附「打开浏览器 / 复制」操作
+- 前端按 interval 轮询 `poll_github_auth`，授权成功跳转主界面
 
-**UI 设计风格**: 参考 Docker Desktop 的简洁风格
-- 左侧导航栏：图标 + 文字
-- 主内容区：卡片式布局
-- 深色主题优先
-- 状态指示器：绿/黄/红圆点
+#### 4.5 主界面（占位，Phase 4 续）
+**Implementation file**: `deploykeys-ui/src/app.rs`（`Placeholder` 组件）
+- 顶部导航：Repos / Targets / Keys / Forge + 已登录身份 + 退出
+- Repos/Targets/Keys/Forge 的实际内容（仓库列表、Key Forge 表单等）
+  待接入对应 IPC 命令后实现
+
+**UI 设计风格**: Tailwind v4 + Preline 风格 utility 类
+- 卡片式布局、顶部导航、状态指示圆点（绿/黄/红）
+- 响应式 i18n（en/zh），文案走 `i18n.rs` 词条表
 
 ---
 
@@ -304,7 +320,7 @@ GIT_SSH_COMMAND="ssh -i <key_path> -o IdentitiesOnly=yes" \
   3. 更新 KeyBinding status 为 revoked
 
 #### 5.4 KeyBinding Detail 界面
-**Implementation file**: `deploykeys-gui/src/screens/binding_detail.rs`
+**Implementation file**: `deploykeys-ui/src/screens/binding_detail.rs`（前端）+ 对应 IPC 命令（`deploykeys-gui/src/lib.rs`）
 - 显示 KeyBinding 完整信息
 - 状态指示器：Active (绿) / Drifted (黄) / Failed (红)
 - 按钮：Verify, Revoke, View Public Key
@@ -338,7 +354,7 @@ GIT_SSH_COMMAND="ssh -i <key_path> -o IdentitiesOnly=yes" \
   6. 返回 `RemoteKeyPair { algorithm, public_key, private_key_path }`
 
 #### 6.4 Target Manager 界面
-**Implementation file**: `deploykeys-gui/src/screens/target_manager.rs`
+**Implementation file**: `deploykeys-ui/src/screens/target_manager.rs`（前端界面）+ `deploykeys-gui` 侧对应 IPC 命令
 - 列表显示所有 targets (Local + Remote)
 - "Add Remote Target" 按钮 → 弹出表单：
   - Alias (用户友好名称)
@@ -389,18 +405,29 @@ GIT_SSH_COMMAND="ssh -i <key_path> -o IdentitiesOnly=yes" \
 - `src/models/{account,target,repository,key_binding}.rs` - 数据模型
 - `src/db/mod.rs` + `src/db/*_repository.rs` - 数据访问层
 - `src/credentials/mod.rs` - 凭据管理
-- `src/github/{client,auth,deploy_keys,installations}.rs` - GitHub API
-- `src/ssh/{executor,russh_executor}.rs` - SSH 抽象
-- `src/keygen/{local,remote}.rs` - Key 生成
-- `src/services/{key_forge,verification,revoke,target}.rs` - 业务服务
-- `migrations/001_initial.sql` - 数据库 schema
+- `src/github/{client,deploy_keys,oauth}.rs` - GitHub API（client / Deploy Keys / 设备流）
+- `src/ssh/{mod,executor}.rs` - SSH 抽象（Phase 6 接 russh 实现）
+- `src/keygen/{mod,local}.rs` - Key 生成（remote 属 Phase 6）
+- `src/services/{auth_service,key_binding_service,target_service}.rs` - 业务服务
+- `src/verification/mod.rs` - 验证 / 漂移语义
+- `migrations/{001_initial,002_settings}.sql` - 数据库 schema
 
-### GUI (deploykeys-gui)
+### 原生宿主 (deploykeys-gui，Tauri)
 
-- `src/main.rs` - 入口
-- `src/app.rs` - Iced Application 主循环
-- `src/messages.rs` - Message 枚举
-- `src/screens/{welcome,auth,repo_list,key_forge,target_manager,binding_detail}.rs` - 界面
+- `src/main.rs` - 入口（调 `deploykeys_lib::run()`）
+- `src/lib.rs` - IPC 命令面 + DTO + AppState + 事件循环
+- `tauri.conf.json` - Tauri 配置（窗口、CSP、`withGlobalTauri`、bundle）
+- `capabilities/default.json` - 主窗口权限能力
+
+### 前端 (deploykeys-ui，Leptos/wasm)
+
+- `src/main.rs` - wasm 入口（`mount_to_body`）
+- `src/app.rs` - 根组件、屏幕状态机、设备流轮询循环
+- `src/api.rs` - IPC 命令的前端镜像 DTO + 调用封装
+- `src/tauri.rs` - `window.__TAURI__.core.invoke` 桥
+- `src/i18n.rs` - 内联词条表 + 响应式 locale 信号
+- `src/screens/{welcome,oauth}.rs` - 界面
+- `styles/{input,output}.css` + `Trunk.toml` - Tailwind 与构建配置
 
 ---
 
@@ -456,8 +483,8 @@ GIT_SSH_COMMAND="ssh -i <key_path> -o IdentitiesOnly=yes" \
 ### 风险 3: 跨平台 keyring 兼容性问题
 **缓解**: 优先支持 macOS Keychain 和 Linux Secret Service。本期不支持 Windows。提供降级方案（加密本地文件）用于测试环境。
 
-### 风险 4: Iced GUI 学习曲线
-**缓解**: 先实现最简界面（纯文本列表 + 按钮），UI 美化作为后续迭代。参考 Iced 官方示例。
+### 风险 4: 前端（Leptos/wasm + Tauri IPC）学习曲线
+**缓解**: 先实现最简界面（纯文本 + 按钮），UI 美化作为后续迭代。前端经 IPC 命令拿脱敏 DTO，业务逻辑全在核心库，前端尽量薄。
 
 ### 风险 5: 远程 Key 生成失败回滚
 **缓解**: 实现事务式操作：先生成 key，验证成功后再创建 GitHub Deploy Key。失败时清理远程临时文件。
@@ -476,7 +503,7 @@ GIT_SSH_COMMAND="ssh -i <key_path> -o IdentitiesOnly=yes" \
 - ✅ KeyBinding 验证（git ls-remote 测试）
 - ✅ Revoke 流程
 - ✅ Drift Detection
-- ✅ 基础 Iced GUI（5 个核心界面）
+- ✅ 基础前端界面（Leptos/wasm，5 个核心界面）
 
 ---
 

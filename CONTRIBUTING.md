@@ -18,7 +18,7 @@
 ```
 deploykeys-desktop/
 ├── crates/
-│   ├── deploykeys-core/          # 核心业务逻辑（无 GUI 依赖）
+│   ├── deploykeys-core/          # 核心业务逻辑（原生，无 UI 依赖）
 │   │   ├── src/
 │   │   │   ├── models/        # 数据模型（仅结构体和枚举）
 │   │   │   ├── db/            # 数据库访问层（Repository 模式）
@@ -31,24 +31,36 @@ deploykeys-desktop/
 │   │   │   ├── utils/         # 工具函数
 │   │   │   ├── error.rs       # 错误类型定义
 │   │   │   └── lib.rs         # Crate 入口
-│   │   ├── tests/             # 集成测试
-│   │   └── Cargo.toml
+│   │   └── Cargo.toml         # （测试内联在 src/**/tests.rs）
 │   │
-│   └── deploykeys-gui/           # GUI 应用（依赖 deploykeys-core）
+│   ├── deploykeys-gui/           # Tauri 2 原生宿主（依赖 deploykeys-core）
+│   │   ├── src/
+│   │   │   ├── lib.rs         # IPC 命令面 + DTO + AppState + 事件循环
+│   │   │   └── main.rs        # 程序入口（调用 lib::run）
+│   │   ├── capabilities/      # Tauri 权限能力（default.json）
+│   │   ├── tauri.conf.json    # Tauri 配置
+│   │   ├── build.rs           # tauri-build
+│   │   └── Cargo.toml         # 二进制名 `deploykeys`
+│   │
+│   └── deploykeys-ui/            # Leptos CSR 前端（Trunk 构建为 wasm）
 │       ├── src/
-│       │   ├── screens/       # 各个界面实现
-│       │   ├── components/    # 可复用 UI 组件
-│       │   ├── app.rs         # 应用主状态机
-│       │   ├── messages.rs    # 消息定义
-│       │   └── main.rs        # 程序入口
+│       │   ├── app.rs         # 根组件、屏幕状态、设备流轮询
+│       │   ├── api.rs         # IPC 命令的 UI 侧 DTO 与封装
+│       │   ├── tauri.rs       # window.__TAURI__ invoke 桥
+│       │   ├── i18n.rs        # 内联词条表 + 响应式 locale
+│       │   ├── screens/       # Welcome / OAuth 界面
+│       │   └── main.rs        # mount_to_body
+│       ├── styles/            # Tailwind 输入/输出 CSS
+│       ├── index.html         # Trunk 入口
+│       ├── Trunk.toml         # Trunk 构建配置（Tailwind pre-build hook）
 │       └── Cargo.toml
 │
 ├── migrations/                # SQLite 数据库迁移脚本
-├── assets/                    # 资源文件（图标、字体等）
+├── tools/                     # 固定的 Tailwind v4 standalone 二进制 + 安装脚本
 ├── docs/                      # 文档
 ├── .github/                   # GitHub Actions CI/CD
 ├── target/                    # 构建产物（Git 忽略）
-├── Cargo.toml                 # Workspace 配置
+├── Cargo.toml                 # Workspace 配置（default-members 排除 wasm UI crate）
 ├── Cargo.lock                 # 依赖锁文件（提交到 Git）
 ├── .gitignore
 ├── README.md
@@ -63,14 +75,14 @@ deploykeys-desktop/
 ✅ **允许**：
 - `crates/deploykeys-core/src/models/` - 数据模型
 - `crates/deploykeys-core/src/db/` - 数据库 Repository
-- `crates/deploykeys-core/tests/` - 集成测试
-- `crates/deploykeys-gui/src/screens/` - UI 界面
+- `crates/deploykeys-core/src/**/tests.rs` - 测试（与被测模块同 crate，内联模块）
+- `crates/deploykeys-ui/src/screens/` - 前端界面（Leptos 组件）
 - `migrations/*.sql` - 数据库迁移
 
 ❌ **禁止**：
-- ❌ GUI 代码出现在 `deploykeys-core`
-- ❌ 业务逻辑出现在 `deploykeys-gui`（除 UI 状态管理）
-- ❌ 测试代码在 `src/` 目录（应在 `tests/`）
+- ❌ 业务逻辑出现在 `deploykeys-core` 之外（宿主/前端只做桥接与展示）
+- ❌ 机密（token、keyring 引用）跨越 IPC 边界或出现在 `deploykeys-ui`
+- ❌ `deploykeys-ui` 直接依赖 `deploykeys-core`（core 是 native-only，无法编进 wasm）
 - ❌ 临时文件、测试数据库、密钥文件提交到 Git
 - ❌ `target/` 目录提交到 Git
 - ❌ `.env` 文件提交到 Git（使用 `.env.example`）
@@ -219,8 +231,9 @@ Closes #123
 ### 提交前检查清单
 
 - [ ] 运行 `cargo fmt --all`
-- [ ] 运行 `cargo clippy -- -D warnings`
-- [ ] 运行 `cargo test --all`
+- [ ] 运行 `cargo clippy --workspace --all-targets -- -D warnings`
+- [ ] 运行 `cargo test`（原生 crate；wasm-only 的 ui crate 经 default-members 排除）
+- [ ] 一步到位：`make check`（fmt + clippy + test）
 - [ ] 更新相关文档
 - [ ] 移除调试代码（`println!`, `dbg!`）
 - [ ] 确保没有 `TODO` 或 `FIXME` 注释（除非有 Issue 跟踪）
@@ -231,14 +244,18 @@ Closes #123
 
 ### 测试文件组织
 
+测试与被测模块同 crate，作为内联子模块（`#[cfg(test)] mod tests`）或同目录的
+`tests.rs`，不放独立的顶层 `tests/` 目录：
+
 ```
 crates/deploykeys-core/
-├── src/
-│   └── db/
-│       └── account_repository.rs
-└── tests/
+└── src/
     └── db/
-        └── account_repository_test.rs  # 集成测试
+        ├── account_repository.rs   # 实现
+        ├── mod.rs
+        ├── tests.rs                 # 单表 CRUD 单元测试
+        ├── integration_tests.rs     # 跨表/级联集成测试
+        └── test_support.rs          # 临时 DB + 真实迁移的测试夹具
 ```
 
 ### 单元测试

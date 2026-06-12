@@ -19,7 +19,8 @@ help:
 	@echo "  clean      - Clean build artifacts (keeps deploykeys.db)"
 	@echo "  db-setup   - Create the sqlx compile-time check database"
 	@echo "  db-clean   - Remove the sqlx compile-time check database"
-	@echo "  install    - Install the application"
+	@echo "  install    - Bundle the app and print install instructions"
+	@echo "  watch      - Auto-run clippy + test on change (native crates)"
 	@echo ""
 
 # Bundle the release desktop app. Tauri runs the configured beforeBuildCommand
@@ -75,10 +76,13 @@ clean:
 	@echo "Cleaning..."
 	cargo clean
 
-# Install application
-install:
-	@echo "Installing..."
-	cargo install --path crates/deploykeys-gui
+# Install application. A Tauri app needs its bundled webview assets, so the
+# right artifact is the bundle produced by `cargo tauri build` (see the `build`
+# target) — not `cargo install`, which would skip the frontend. On macOS, copy
+# the resulting .app from target/release/bundle/macos/ into /Applications.
+install: build
+	@echo "Build complete. Copy the bundle from target/release/bundle/ to install."
+	@echo "  macOS: cp -R 'target/release/bundle/macos/DeployKeys Desktop.app' /Applications/"
 
 # Create the database used by sqlx compile-time query checks
 db-setup:
@@ -92,9 +96,12 @@ db-setup:
 db-clean:
 	rm -f deploykeys.db deploykeys.db-shm deploykeys.db-wal
 
-# Watch and auto-rebuild (requires cargo-watch)
+# Watch and auto-rebuild. `cargo tauri dev` already hot-reloads: Trunk watches
+# the frontend and rebuilds the wasm, and Tauri rebuilds the native host on
+# change. So development watching is just `make run`. Use this target for a
+# native-crate-only check loop (no window) when iterating on core/host logic.
 watch:
-	cargo watch -x 'run -p deploykeys-gui'
+	cargo watch -x 'clippy --workspace --all-targets -- -D warnings' -x test
 
 # Generate documentation
 docs:

@@ -930,21 +930,24 @@ Read-write Deploy Key 必须被视为高风险权限。
 
 ## 10.1 前端 GUI
 
-推荐：
+采用：
 
 ```text
-Iced
+Tauri 2（原生宿主）+ Leptos CSR/wasm（前端）+ Tailwind v4
 ```
 
 原因：
 
 ```text
-纯 Rust
-跨平台
-适合桌面端
-状态驱动 UI
-适合构建安全工具类产品
+原生宿主与前端分离：业务能力留在 Rust 原生侧，前端是 webview 中的 wasm
+机密不跨界：前端经 IPC 只收发脱敏 DTO，token/keyring 引用永不进 webview
+跨平台：Tauri 支持 macOS/Linux（及未来 Windows）
+前端仍是 Rust：Leptos 以 Rust 写响应式 UI，与核心库同语言
+样式无 Node 依赖：Tailwind v4 standalone 二进制（tools/），Trunk 构建
 ```
+
+> 注：初版曾选用纯 Rust 的 Iced GUI，后重构为 Tauri 2 + Leptos。
+> 当前架构详见 [ARCHITECTURE.md](ARCHITECTURE.md)。
 
 ---
 

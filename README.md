@@ -24,6 +24,13 @@ A secure, user-friendly desktop application for managing GitHub Deploy Keys with
 - Rust 1.75+ ([Install Rust](https://rustup.rs))
 - macOS 10.15+ or Linux (x86_64)
 - `sqlite3` CLI (for the compile-time check database)
+- The `wasm32-unknown-unknown` target: `rustup target add wasm32-unknown-unknown`
+- [Trunk](https://trunkrs.dev) (builds the Leptos/wasm frontend): `cargo install trunk`
+- The Tauri CLI (drives dev/build): `cargo install tauri-cli --version "^2"` (provides `cargo tauri`)
+
+> Tailwind needs no Node toolchain: a pinned standalone Tailwind v4 binary lives
+> in `tools/` and is run by Trunk's pre-build hook. Fetch it once with
+> `tools/install-tailwind.sh` if it is missing.
 
 ### Installation
 
@@ -34,7 +41,7 @@ cd deploykeys-desktop
 # Create the database used by sqlx compile-time query checks
 make db-setup
 
-# Build and run
+# Run the app in development (Tauri opens a window onto the Trunk dev server)
 make run
 ```
 
@@ -47,11 +54,8 @@ cp .env.example .env
 # Set up the compile-time check database
 make db-setup
 
-# Run all checks (fmt + clippy -D warnings + test)
+# Run all checks (fmt + clippy -D warnings + test) on the native crates
 make check
-
-# Run in watch mode (requires cargo-watch)
-make watch
 ```
 
 ## 📖 Documentation
@@ -67,18 +71,31 @@ make watch
 ```
 deploykeys-desktop/
 ├── crates/
-│   ├── deploykeys-core/      # Core business logic
-│   └── deploykeys-gui/       # Iced GUI application
+│   ├── deploykeys-core/      # Core business logic (native, no UI deps)
+│   ├── deploykeys-gui/       # Tauri 2 native host (binary: `deploykeys`)
+│   └── deploykeys-ui/        # Leptos CSR frontend, built to wasm by Trunk
 ├── migrations/            # Database migrations (sqlx::migrate!)
+├── tools/                 # Pinned Tailwind v4 standalone binary + installer
 ├── docs/archive/          # Superseded phase reports (do not cite)
 └── .github/workflows/     # CI (fmt, clippy, test, audit)
 ```
 
+The Tauri host (`deploykeys-gui`) opens the database and exposes a small IPC
+command surface that bridges to `deploykeys-core`. The webview (`deploykeys-ui`)
+is plain CSR wasm and never depends on `deploykeys-core` — it calls the IPC
+commands and receives purpose-built DTOs, so secrets (keyring references,
+tokens) never cross the IPC boundary. The UI crate is wasm-only and excluded
+from the workspace `default-members`, so a bare `cargo build`/`cargo test` at
+the root only touches the native crates.
+
 ## 🔧 Development Commands
 
 ```bash
-make build      # Build release binary
-make test       # Run all tests
+make run        # Run in development (Tauri + Trunk dev server, hot reload)
+make build      # Bundle the release desktop app (Tauri + Trunk frontend)
+make dev        # Build the native crates in debug
+make ui-build   # Build just the Leptos/wasm frontend with Trunk
+make test       # Run all tests (native crates)
 make fmt        # Format code
 make clippy     # Run linter (deny warnings)
 make check      # Run all checks (fmt + clippy + test)
@@ -114,6 +131,9 @@ This project is licensed under the MIT License - see [LICENSE](LICENSE) file for
 
 Built with:
 - [Rust](https://www.rust-lang.org/) - Programming language
-- [Iced](https://iced.rs/) - Cross-platform GUI framework
+- [Tauri 2](https://tauri.app/) - Desktop shell (native host + webview)
+- [Leptos](https://leptos.dev/) - Rust/wasm UI framework (CSR frontend)
+- [Trunk](https://trunkrs.dev/) - wasm build tool
+- [Tailwind CSS](https://tailwindcss.com/) - Utility-first styling (standalone v4 binary)
 - [SQLx](https://github.com/launchbadge/sqlx) - Async SQL toolkit
 - [Tokio](https://tokio.rs/) - Async runtime

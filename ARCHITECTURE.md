@@ -4,16 +4,27 @@
 
 ### 整体架构
 
+应用是一个 Tauri 2 桌面程序：原生宿主 crate（`deploykeys-gui`）持有所有
+业务能力，前端是独立的 Leptos CSR/wasm crate（`deploykeys-ui`），跑在
+webview 里。两者只通过 Tauri 的 IPC 命令桥通信，且只传脱敏 DTO——
+keyring 引用、token 等机密永不跨越 IPC 边界。
+
 ```
-┌─────────────────────────────────────────────────────────┐
-│                    deploykeys-gui (GUI层)                   │
-│  ┌─────────────┐  ┌──────────────┐  ┌──────────────┐   │
-│  │   Welcome   │  │ Repositories │  │   Targets    │   │
-│  │   Screen    │  │    Screen    │  │    Screen    │   │
-│  └─────────────┘  └──────────────┘  └──────────────┘   │
-│         │                │                   │           │
-│         └────────────────┴───────────────────┘           │
-│                          │                               │
+┌──────────────────────────────────────────────────────────┐
+│              deploykeys-ui (前端 / Leptos CSR wasm)          │
+│  ┌─────────────┐  ┌──────────────┐  ┌──────────────┐    │
+│  │   Welcome   │  │    OAuth      │  │  Placeholder │    │
+│  │   Screen    │  │ (Device Flow) │  │  (Phase 4)   │    │
+│  └─────────────┘  └──────────────┘  └──────────────┘    │
+│         跑在 webview 中，无 deploykeys-core 依赖            │
+└──────────────────────────┬───────────────────────────────┘
+                           │  Tauri IPC（window.__TAURI__.core.invoke）
+                           │  仅传脱敏 DTO，机密不过界
+┌──────────────────────────┼───────────────────────────────┐
+│           deploykeys-gui (Tauri 原生宿主)                    │
+│  IPC 命令面：get_session / get_language / set_language /   │
+│  start_github_auth / poll_github_auth / open_url           │
+│  打开数据库、注入 AppState、桥接到 core                     │
 └──────────────────────────┼───────────────────────────────┘
                            │
 ┌──────────────────────────┼───────────────────────────────┐
@@ -44,38 +55,66 @@
 
 ## 分层设计
 
-### 1. GUI 层 (`deploykeys-gui`)
+### 1. 前端层 (`deploykeys-ui`)
+
+纯 CSR（client-side rendered）wasm，用 Leptos 0.6 写，由 Trunk 构建。
+样式走 Tailwind v4（tools/ 下固定的 standalone 二进制，无 Node 依赖），
+组件风格抄自 Preline 的 utility 类。
 
 **职责**：
-- 用户交互
-- 界面渲染
-- 用户输入验证
-- 状态管理（仅 UI 状态）
+- 用户交互与界面渲染（Leptos `view!` + 响应式信号）
+- 用户输入验证（UI 层面）
+- UI 状态管理（`RwSignal`，如当前屏幕、登录中标志、错误信息）
+- 经 Tauri IPC 调用原生命令并解析回传的 DTO
 
 **依赖**：
-- `deploykeys-core`（业务逻辑）
-- `iced`（GUI 框架）
-- `iced_aw`（UI 组件库）
+- `leptos`（CSR 框架）
+- `wasm-bindgen` / `serde-wasm-bindgen` / `js-sys` / `web-sys`（绑定与 IPC）
+- **不依赖** `deploykeys-core`：core 会拉入 tokio/sqlx/keyring 等 native-only
+  依赖，无法编进 wasm。UI 只镜像它需要的字段为本地 DTO。
 
 **禁止**：
-- ❌ 直接操作数据库
-- ❌ 直接调用 GitHub API
+- ❌ 直接操作数据库或调用 GitHub API
 - ❌ 实现业务逻辑
+- ❌ 让机密（token、keyring 引用）出现在前端
 
 **示例**：
 ```rust
-// ✅ 正确：通过 service 层
-let repos = service.list_repositories().await?;
+// ✅ 正确：经 IPC 命令拿脱敏 DTO
+let account = api::get_session().await?;   // -> Option<Account { login, avatar_url }>
 
-// ❌ 错误：直接操作数据库
+// ❌ 错误：前端无法、也不应直接碰 core 或数据库
 let repos = db.query("SELECT * FROM repositories")?;
 ```
 
 ---
 
-### 2. 核心层 (`deploykeys-core`)
+### 2. 原生宿主层 (`deploykeys-gui`)
 
-#### 2.1 服务层 (`services/`)
+Tauri 2 宿主。产出名为 `deploykeys` 的二进制。负责打开数据库、把
+`AppState` 注入每个命令、注册 IPC 命令面、运行 Tauri 事件循环。
+
+**职责**：
+- 启动时打开（或创建）数据库并跑迁移，stash 进 Tauri managed state
+- 暴露 IPC 命令，桥接到 `deploykeys-core`
+- 定义跨 IPC 边界的 DTO，确保机密不外泄
+
+**IPC 命令面**：
+| 命令 | 作用 |
+|---|---|
+| `get_session` | 返回持久化的会话账号（脱敏 DTO） |
+| `get_language` / `set_language` | 读写持久化语言偏好 |
+| `start_github_auth` | 发起设备流，返回 device/user code |
+| `poll_github_auth` | 轮询一次 token 端点；授权成功则完成登录 |
+| `open_url` | 用系统默认浏览器打开 URL |
+
+**依赖**：`deploykeys-core`、`tauri`、`tokio`、`dirs`、`open` 等。
+
+---
+
+### 3. 核心层 (`deploykeys-core`)
+
+#### 3.1 服务层 (`services/`)
 
 **职责**：
 - 业务逻辑编排
@@ -111,7 +150,7 @@ impl KeyBindingService {
 }
 ```
 
-#### 2.2 数据访问层 (`db/`)
+#### 3.2 数据访问层 (`db/`)
 
 **职责**：
 - CRUD 操作
@@ -138,21 +177,21 @@ impl AccountRepository {
 }
 ```
 
-#### 2.3 外部集成层
+#### 3.3 外部集成层
 
 **GitHub API** (`github/`):
-- Device Flow 认证
-- Deploy Keys 管理
-- Installations API
+- `oauth.rs`：Device Flow 认证（设备码请求 + token 轮询）
+- `deploy_keys.rs`：Deploy Keys CRUD
+- `client.rs`：通用 HTTP 客户端
+- Installations / 仓库同步尚未实现（PLAN Phase 2.3）
 
 **SSH** (`ssh/`):
-- 远程命令执行
-- 文件传输
-- Host Key 验证
+- `executor.rs`：仅定义 `SshExecutor` trait（远程命令执行、文件读取等）
+- 具体实现（russh）属 Phase 6，尚未落地
 
 **Key 生成** (`keygen/`):
-- 本地生成 SSH Key
-- 支持多种算法
+- `local.rs`：本地生成 SSH Key，支持 Ed25519 / RSA 2048·4096 / ECDSA P-256·384·521
+- 远程生成（`remote.rs`）属 Phase 6，尚未落地
 
 **凭据管理** (`credentials/`):
 - 系统 Keyring 集成
@@ -162,35 +201,41 @@ impl AccountRepository {
 
 ## 数据流
 
-### 创建 Key Binding 流程
+### GitHub 设备流登录（现已落地的代表性数据流）
 
 ```
-User Action (GUI)
+用户点击 "Sign in with GitHub"（前端 Welcome 屏）
     │
     ▼
-[Button Click: Create Binding]
+前端 spawn_local → api::start_github_auth()
+    │  经 Tauri IPC (invoke "start_github_auth")
+    ▼
+原生命令 start_github_auth → DeviceFlowClient::request_device_code()
+    │  返回 DeviceCodeDto（device_code/user_code/verification_uri/interval）
+    ▼
+前端切到 OAuth 屏，展示 user_code，并按 interval 启动轮询循环
     │
     ▼
-Message::CreateKeyBinding(repo_id, target_id)
-    │
-    ▼
-App::update() - 调用 service
-    │
-    ▼
-KeyBindingService::create_and_bind_key()
-    │
-    ├─► KeyGenerator::generate() → 生成 SSH Key
-    │
-    ├─► GitHubClient::create_deploy_key() → 上传公钥
-    │
-    └─► KeyBindingRepository::create() → 保存到数据库
-        │
-        ▼
-    Success/Error 返回到 GUI
-    │
-    ▼
-[Update UI State]
+api::poll_github_auth(device_code)  ── 每隔 interval 秒 ──┐
+    │  IPC invoke "poll_github_auth"                       │
+    ▼                                                      │
+原生命令 poll_github_auth → DeviceFlowClient::poll_for_token()
+    │                                                      │
+    ├─ Pending  → 前端再排一次轮询 ────────────────────────┘
+    ├─ SlowDown → interval += 5s 后再轮询 ──────────────────┘
+    └─ Authorized(tokens)
+         │
+         ▼
+       AuthService::complete_device_flow(tokens)
+         ├─► keyring 存 access/refresh token
+         └─► accounts 表 upsert 账号
+         │
+         ▼
+       返回 AccountDto → 前端切到主界面（Placeholder）
 ```
+
+> 注：Key Binding 创建流程（KeyBindingService）核心库已实现，但前端对应
+> 界面属 Phase 4，尚未接入 IPC；上面的设备流是当前端到端跑通的代表。
 
 ---
 
@@ -235,9 +280,10 @@ pub type Result<T> = std::result::Result<T, Error>;
 
 ### 异步运行时
 
-- **主运行时**: Tokio
-- **GUI 事件循环**: Iced 内置
+- **原生侧运行时**: Tokio（Tauri 托管；IPC 命令为 `async fn`，在其上执行）
 - **数据库连接池**: SQLx 管理
+- **前端**: wasm 单线程，异步任务经 `wasm_bindgen_futures::spawn_local` 调度，
+  通过 IPC 调用原生命令；轮询节流用 `setTimeout`（见 `ui/src/app.rs`）
 
 ### 并发策略
 
@@ -303,11 +349,12 @@ let log = sanitize_log(&message);
 - 实现请求重试（指数退避）
 - 使用流式处理大响应
 
-### 3. GUI 渲染
+### 3. UI 渲染（Leptos webview）
 
-- 避免在 `view()` 中做重计算
-- 使用状态缓存
-- 惰性加载长列表
+- 视图是细粒度响应式：信号（`RwSignal`）变化只更新依赖它的 DOM 节点，无整树重绘
+- 重计算放进 `Memo`，不要写在视图闭包里反复求值
+- 长列表用 `<For>` 配合稳定 key，避免整列表重建
+- IPC 调用在 `spawn_local` 里异步进行，不阻塞渲染
 
 ---
 
@@ -380,13 +427,19 @@ deploykeys-desktop/
 
 ### 数据存储位置
 
-- **macOS**: `~/Library/Application Support/com.deploykeys.desktop/`
+运行时数据目录由 `dirs::data_dir()/deploykeys/` 决定：
+
+- **macOS**: `~/Library/Application Support/deploykeys/`
 - **Linux**: `~/.local/share/deploykeys/`
 
-### 配置文件
+（旧版本曾用 `deplock/`；首次启动会自动迁移，连带 `-wal`/`-shm` 一起搬，避免孤立 WAL 损坏数据库。）
 
-- `.claude/settings.json` - 用户配置
-- `deploykeys.db` - 应用数据库
+### 应用数据
+
+- `deploykeys.db` - 运行时 SQLite 数据库（位于上面的数据目录）
+- `app_settings` 表 - 语言偏好等键值设置（迁移 `002_settings.sql`）
+
+仓库根目录的 `deploykeys.db` 与运行时无关，仅供 sqlx 编译期查询校验（`make db-setup` 生成）。
 
 ---
 

@@ -1,8 +1,12 @@
 # 国际化（i18n）设计文档
 
-状态：**已实施**（2026-06-11）。本文件既是设计依据，也是现行约束；项目级开发约束见 [`PLAN.md` §开发约束 C1](../PLAN.md)。
-范围：`deploykeys-gui` 全部用户可见文案；`deploykeys-core` 错误的本地化策略
+状态：**已实施**（2026-06-13，随 Tauri + Leptos 重构更新）。本文件既是设计依据，也是现行约束；项目级开发约束见 [`PLAN.md` §开发约束 C1](../PLAN.md)。
+范围：`deploykeys-ui`（Leptos CSR 前端）全部用户可见文案；`deploykeys-core` 错误的本地化策略。
 默认语言：**English (`en`)**；首发第二语言：**简体中文 (`zh`)**
+
+> 实现位置：所有词条与查找逻辑集中在 `crates/deploykeys-ui/src/i18n.rs`。
+> 语言偏好的持久化在原生侧（`deploykeys-gui`），前端经 IPC 命令
+> `get_language` / `set_language` 读写。
 
 ---
 
@@ -10,280 +14,200 @@
 
 ### 目标
 - 所有用户可见字符串集中管理，可在英文 / 中文之间切换，**默认英文**。
-- 运行时切换语言，无需重启（iced 每帧重建视图，天然支持）。
-- 翻译键集合在多语言间保持一致，缺漏可由测试自动发现。
-- `deploykeys-core` 不持有面向用户的本地化文案，仅返回稳定的技术错误；本地化由 GUI 层承担。
+- 运行时切换语言，无需重启（Leptos 响应式信号驱动，翻转 locale 即重渲染）。
+- 翻译键集合在多语言间保持一致。
+- `deploykeys-core` 不持有面向用户的本地化文案，仅返回稳定的技术错误；本地化由前端承担。
 - 用户的语言选择可持久化，下次启动沿用。
 
 ### 非目标（本期不做）
 - 复数 / 性别 / 语法格变形（当前文案无此需求；见 §9 选型权衡）。
 - 从右到左（RTL）布局。
-- 运行时热加载外部翻译文件（翻译在编译期内嵌）。
+- 运行时热加载外部翻译文件（词条编译期内嵌进 wasm）。
 - 日期 / 数字 / 货币的区域格式化（暂无相关展示）。
 
 ---
 
-## 2. 现状盘点
+## 2. 架构约束：为什么是内联词条表
 
-字符串目前硬编码且中英混杂，分布如下：
+重构后前端是纯 CSR（client-side rendered）wasm，由 Trunk 构建，跑在 Tauri webview 里。
+这带来两条硬约束，直接决定了 i18n 的形态：
 
-| 文件 | 现有文案（节选） | 处理 |
-|---|---|---|
-| `screens/welcome.rs` | `DeployKeys Desktop`、`Target-based GitHub Deploy Key Manager`、`Sign in with GitHub`、`正在连接 GitHub...` | 品牌名保留；其余进词条 |
-| `screens/oauth.rs` | `GitHub 认证`、`请在浏览器中完成认证`、`1. 访问以下网址:`、`2. 输入以下代码:`、`正在等待授权…`、`取消` | 全部进词条 |
-| `app.rs`（view） | 导航 `Home/Repos/Targets/Keys/Forge`、屏幕标题、`已登录: {login}`、`未登录`、`此界面将在 Phase 4 实现`、`正在请求设备码...` | 全部进词条 |
-| `app.rs`（错误） | `数据库初始化失败: {e}`、`数据库不可用，无法登录`、`登录失败: {e}`、`无法确定用户数据目录` | 进词条；`{e}` 部分见 §6 |
-| `deploykeys-core`（`error.rs` 等） | 英文技术错误（`Database error: …` 等） | 保持英文，不本地化；GUI 按错误类别映射词条 |
+1. **前端不依赖 `deploykeys-core`**：core 会拉入 tokio/sqlx/keyring 等 native-only
+   依赖，无法编进 wasm。因此词条不能放在 core，也不能复用 core 的任何本地化设施。
+2. **运行环境是 wasm，不是原生进程**：没有文件系统读取、没有 `sys-locale` 那套原生
+   探测。启动语言来自 webview 的 `navigator.language`（见 `ui/src/app.rs` 的
+   `detect_locale`），偏好则由原生侧持久化、经 IPC 回传。
 
-**结论**：`deploykeys-core` 错误已是英文技术信息，符合“核心层不本地化”的目标，无需改动其文案；问题集中在 GUI 层。
-
----
-
-## 3. 选型
-
-**采用 `rust-i18n`（v3.x）。**
-
-理由：
-- 编译期把 `locales/*.yml` 内嵌进二进制，零运行时文件依赖，契合单文件分发。
-- `t!("key")` / `t!("key", arg => val)` 宏简洁，返回 `Cow<str>`，可直接喂给 `iced::widget::text`。
-- `rust_i18n::set_locale("zh")` 实现运行时全局切换；`available_locales!()` 便于做一致性测试。
-- 体积与心智负担小，与项目当前规模匹配。
-
-权衡见 §9（与 Fluent 的对比）。
-
-新增依赖（`crates/deploykeys-gui/Cargo.toml`）：
-```toml
-rust-i18n = "3"
-sys-locale = "0.3"   # 启动时探测系统语言（可选）
-```
+据此，词条以**内联静态字符串表**编译进 wasm（`const EN`/`const ZH`，`&[(&str, &str)]`），
+查找用 `t(key)`，响应式由 Leptos `RwSignal<Locale>` 提供。这是当前规模下最直接、零运行时
+依赖的选择。
 
 ---
 
-## 4. 目录与文件结构
+## 3. 实现概览（`ui/src/i18n.rs`）
 
-```
-crates/deploykeys-gui/
-├── locales/
-│   ├── en.yml          # 英文（基准，键的事实来源）
-│   └── zh.yml          # 简体中文
-├── src/
-│   ├── i18n.rs         # Locale 枚举、初始化、切换、系统探测
-│   ├── main.rs         # rust_i18n::i18n!("locales", fallback = "en")
-│   └── ...
-```
+### 3.1 Locale 类型
 
-`main.rs` 顶部声明（编译期加载 + 回退到 en）：
 ```rust
-rust_i18n::i18n!("locales", fallback = "en");
-```
-
----
-
-## 5. 词条键规范
-
-- 命名：`snake_case`，按界面 / 域分组的点号命名空间。
-- 基准语言 `en.yml` 是键的唯一事实来源；其它语言文件必须键集完全一致。
-- 插值用具名占位符 `%{name}`，不要用位置参数（顺序在不同语言会变）。
-
-### 5.1 键清单（首版完整集）
-
-```yaml
-# en.yml
-_version: 1
-
-app:
-  brand: "DeployKeys Desktop"          # 品牌名，通常不翻译，入词条以备调整
-  tagline: "Target-based GitHub Deploy Key Manager"
-
-nav:
-  home: "Home"
-  repos: "Repositories"
-  targets: "Targets"
-  keys: "Key Bindings"
-  forge: "Key Forge"
-
-welcome:
-  sign_in: "Sign in with GitHub"
-  signing_in: "Connecting to GitHub…"
-
-oauth:
-  title: "GitHub Authentication"
-  instruction: "Complete the authorization in your browser"
-  step_visit: "1. Visit this URL:"
-  step_code: "2. Enter this code:"
-  waiting: "Waiting for authorization, checking every few seconds…"
-  requesting_code: "Requesting device code…"
-
-session:
-  signed_in_as: "Signed in as %{login}"
-  not_signed_in: "Not signed in"
-
-screen:
-  placeholder_phase4: "This screen will be implemented in Phase 4"
-
-common:
-  cancel: "Cancel"
-
-settings:
-  language: "Language"
-  language_en: "English"
-  language_zh: "简体中文"
-
-error:
-  db_init_failed: "Failed to initialize the database: %{detail}"
-  db_unavailable_login: "Database unavailable; cannot sign in"
-  db_unavailable_save: "Database unavailable; cannot save the session"
-  data_dir_unknown: "Could not determine the user data directory"
-  device_code_failed: "Failed to obtain device code: %{detail}"
-  auth_failed: "Sign-in failed: %{detail}"
-  device_code_expired: "The login code has expired; please sign in again"
-```
-
-```yaml
-# zh.yml
-_version: 1
-
-app:
-  brand: "DeployKeys Desktop"
-  tagline: "基于目标环境的 GitHub Deploy Key 管理器"
-
-nav:
-  home: "主页"
-  repos: "仓库"
-  targets: "目标"
-  keys: "密钥绑定"
-  forge: "密钥生成"
-
-welcome:
-  sign_in: "使用 GitHub 登录"
-  signing_in: "正在连接 GitHub…"
-
-oauth:
-  title: "GitHub 认证"
-  instruction: "请在浏览器中完成认证"
-  step_visit: "1. 访问以下网址："
-  step_code: "2. 输入以下代码："
-  waiting: "正在等待授权，每隔几秒自动检查…"
-  requesting_code: "正在请求设备码…"
-
-session:
-  signed_in_as: "已登录：%{login}"
-  not_signed_in: "未登录"
-
-screen:
-  placeholder_phase4: "此界面将在 Phase 4 实现"
-
-common:
-  cancel: "取消"
-
-settings:
-  language: "语言"
-  language_en: "English"
-  language_zh: "简体中文"
-
-error:
-  db_init_failed: "数据库初始化失败：%{detail}"
-  db_unavailable_login: "数据库不可用，无法登录"
-  db_unavailable_save: "数据库不可用，无法保存登录状态"
-  data_dir_unknown: "无法确定用户数据目录"
-  device_code_failed: "获取设备码失败：%{detail}"
-  auth_failed: "登录失败：%{detail}"
-  device_code_expired: "登录码已过期，请重新登录"
-```
-
----
-
-## 6. 错误本地化策略
-
-**原则：核心层返回稳定的技术错误（英文）；GUI 层决定如何向用户呈现。**
-
-两类文案分离：
-1. **GUI 自己产生的失败**（如“数据库不可用，无法登录”）：直接用 `error.*` 词条。
-2. **来自 `deploykeys-core` 的错误**（`reqwest`/`sqlx`/keyring 等底层细节）：
-   - 不逐句翻译底层英文（既不现实也无价值）。
-   - GUI 用一条**已本地化的前缀词条** + 原始技术细节作为 `%{detail}`。
-     例：`t!("error.auth_failed", detail => e.to_string())`
-   - 技术细节保持英文，便于用户复制、贴 issue、搜索；前缀本地化保证可读性。
-
-后续若要做到错误前缀也完全分类本地化，可在 `deploykeys-core::Error` 上增加稳定的 `code()`（如 `"network.timeout"`），GUI 据 code 选词条——本期不强制，作为演进点（§8 阶段 4）。
-
----
-
-## 7. 运行时模型
-
-### 7.1 Locale 类型与状态
-```rust
-// i18n.rs
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Locale { En, Zh }
 
 impl Locale {
-    pub fn code(self) -> &'static str { match self { Locale::En => "en", Locale::Zh => "zh" } }
-    pub fn from_code(s: &str) -> Locale {
-        if s.starts_with("zh") { Locale::Zh } else { Locale::En }
+    pub fn code(self) -> &'static str { /* "en" / "zh" */ }
+    pub fn from_code(code: &str) -> Locale {
+        if code.to_ascii_lowercase().starts_with("zh") { Locale::Zh } else { Locale::En }
     }
 }
 ```
 
-`DeployKeysApp` 增加字段 `locale: Locale`。切换语言的消息：
+### 3.2 响应式 locale 信号
+
+locale 以 Leptos context 形式在 App 根注入，任何组件都能取用：
+
 ```rust
-Message::SetLocale(Locale)  // update 中调用 rust_i18n::set_locale(locale.code()) 并存字段
+pub fn provide_locale(initial: Locale) { provide_context(RwSignal::new(initial)); }
+pub fn locale() -> RwSignal<Locale> { use_context().expect("locale signal provided at root") }
 ```
 
-因 iced 每次 `view()` 重新求值，`set_locale` 后下一帧即全量刷新，无需手动重绘。
+`provide_context` 必须在 reactive owner 内调用，因此它在 `App` 组件里执行（见
+`ui/src/app.rs`），而非 `main`。
 
-### 7.2 启动时语言决定顺序
-1. 持久化的用户选择（见 §7.3）——最高优先。
-2. 系统语言：`sys_locale::get_locale()`，`zh*` → `Zh`，其余 → **`En`**。
-3. 兜底：`En`（默认语言）。
+### 3.3 查找函数
 
-### 7.3 持久化
-- 复用现有 SQLite，新增 `app_settings(key TEXT PRIMARY KEY, value TEXT)` 迁移（`migrations/002_settings.sql`）。
-- 读：启动初始化 DB 后查 `language`；写：`SetLocale` 时 upsert。
-- DB 尚未就绪时（如初始化失败）退回系统语言 / 英文，不阻塞 UI。
+```rust
+pub fn t(key: &str) -> &'static str {
+    let loc = locale().get();                       // 订阅信号 → 切语言即重渲染
+    lookup(loc, key).unwrap_or_else(|| lookup(Locale::En, key).unwrap_or("⟨missing⟩"))
+}
+```
+
+- 因为 `t` 读取 `locale().get()`，凡是在 `view!` 中以 `move || t("…")` 形式使用的文案，
+  都会随 locale 信号变化自动刷新。
+- 缺键策略：先按当前语言查，缺失回退英文，再缺失返回 `⟨missing⟩`——**让漏翻在 UI 上
+  显形**，而不是静默。
+
+### 3.4 词条表
+
+`const EN` 与 `const ZH` 两张 `&[(&str, &str)]` 表并列在文件内。新增文案＝两张表各加一行。
 
 ---
 
-## 8. 实施阶段
+## 4. 词条键规范
 
-| 阶段 | 内容 | 验收 |
+- 命名：`snake_case`，按界面 / 域分组的点号命名空间（如 `oauth.title`、`nav.repos`）。
+- 英文表 `EN` 是键的事实来源；`ZH` 必须键集与之一致。
+- 品牌名 `app.brand` 也入表（中英一致），以备将来调整。
+
+### 4.1 当前键清单（节选，完整见源码）
+
+```
+app.brand / app.tagline
+nav.home / nav.repos / nav.targets / nav.keys / nav.forge
+welcome.sign_in / welcome.signing_in
+oauth.title / oauth.instruction / oauth.step_visit / oauth.step_code /
+  oauth.waiting / oauth.requesting_code / oauth.open_in_browser /
+  oauth.copy / oauth.copied
+session.not_signed_in
+screen.placeholder_phase4
+common.cancel / common.sign_out
+settings.language
+```
+
+> 注：当前键均为**无占位符**的静态串。`t(key)` 返回 `&'static str`，不做插值——
+> 需要插值的文案（如「已登录：%{login}」）目前在调用点用 Rust `format!` 拼接
+> （见 `app.rs` 的 `signed_in_as`），词条只承担固定前缀部分。若插值需求增多，见 §9。
+
+---
+
+## 5. 错误本地化策略
+
+**原则不变：核心层返回稳定的技术错误（英文）；前端决定如何呈现。**
+
+- **前端自身产生的失败**：直接用 `error.*` 类词条（如需要时新增）。
+- **来自 `deploykeys-core` / IPC 的错误**：当前经 IPC 命令以 `Result<_, String>` 回传，
+  前端把该字符串原样展示在错误区（见 `screens/welcome.rs` 的错误条、`app.rs` 的
+  `error` 信号）。技术细节保持英文，便于复制、贴 issue、搜索。
+
+后续若要给错误加**已本地化前缀 + 英文技术细节**的组合，可在前端按错误类别套词条；
+更彻底的做法是让 `deploykeys-core::Error` 暴露稳定 `code()`，前端据 code 选词条——
+本期不强制，作为演进点。
+
+---
+
+## 6. 运行时模型
+
+### 6.1 启动时语言决定顺序
+1. **持久化的用户选择**——最高优先。前端 bootstrap 时经 IPC `get_language` 读取；
+   命中则 `locale().set(Locale::from_code(&code))`。
+2. **webview 语言**：`navigator.language()`（`ui/src/app.rs::detect_locale`），
+   `zh*` → `Zh`，其余 → `En`。作为 `provide_locale` 的初始值。
+3. **兜底**：`En`。
+
+### 6.2 切换与持久化
+- 运行时切换：翻转 `locale()` 信号即可，Leptos 下一帧重渲染所有 `t(...)` 文案。
+- 持久化：前端调用 IPC `set_language(code)`，原生侧 upsert 到 `app_settings` 表
+  （迁移 `migrations/002_settings.sql`，键 `language`）。
+- DB 尚未就绪时（如初始化失败）退回 webview 语言 / 英文，不阻塞 UI。
+
+> 现状：词条表与切换机制已就绪，但**面向用户的语言切换入口（设置界面）尚未实现**
+> （`Locale::code` 与 `set_language` 标了 `#[allow(dead_code)]`，预留给 Phase 4 的设置屏）。
+> 当前语言由「持久化偏好 → webview 语言 → 英文」自动决定。
+
+---
+
+## 7. 与原生侧的接口
+
+| IPC 命令 | 方向 | 作用 |
 |---|---|---|
-| 1 | 接入 `rust-i18n`、建 `locales/{en,zh}.yml`、`i18n.rs`、`main.rs` 声明 | 编译通过；`t!("welcome.sign_in")` 返回英文 |
-| 2 | 替换 `welcome.rs`/`oauth.rs`/`app.rs` 全部硬编码为 `t!` | 全程默认英文，无残留中文；clippy 0 警告 |
-| 3 | `Locale` 状态 + `SetLocale` + 系统探测；Welcome 加语言切换入口 | 运行时英↔中切换即时生效 |
-| 4 | `002_settings.sql` + 读写 `language` 偏好 | 重启沿用上次语言 |
-| 5 | 键一致性测试 + 文档更新（README/STATUS） | 测试通过；CI 纳入 |
+| `get_language` | 前端 ← 原生 | 读取持久化的 `language`（`Option<String>`） |
+| `set_language` | 前端 → 原生 | 写入语言偏好（upsert 到 `app_settings`） |
 
-每阶段后跑 `make check`，保持全绿。
+命令定义见 `deploykeys-gui/src/lib.rs`，前端封装见 `deploykeys-ui/src/api.rs`。
 
 ---
 
-## 9. 选型权衡：rust-i18n vs Fluent
+## 8. 与旧方案的差异（重构记录）
 
-| 维度 | rust-i18n（采用） | Fluent（备选） |
-|---|---|---|
-| 复数 / 语法格 | 不支持 | 支持（ICU MessageFormat 级别） |
-| 上手成本 | 低，`t!` 宏 | 高，需 `.ftl` 语法与 bundle 管理 |
-| 运行时切换 | `set_locale` 全局 | 需自管 bundle |
-| 体积 | 小 | 较大（intl-memoizer 等） |
-| 适配本项目 | 文案简单、无复数需求，契合 | 偏重，当前收益不足 |
+iced 时代的设计曾选用 `rust-i18n` + `locales/{en,zh}.yml` + `t!` 宏 + `sys-locale`，
+并配 `tests/i18n_keys.rs` 做键一致性门禁。Tauri + Leptos 重构后这套整体废弃，原因：
 
-**决策**：当前文案无复数 / 格变需求，rust-i18n 性价比最高。若未来出现 “3 keys / 1 key” 这类复数或大量动态语法，再评估迁移到 Fluent（词条键命名规范已为迁移留好结构）。
+- 前端是 wasm，`rust-i18n` 的文件内嵌与 `sys-locale` 的原生探测都不再契合；
+- 词条规模小（约 20+ 键），内联静态表 + `t(key)` 心智负担更低、零额外依赖；
+- 语言探测改由 webview `navigator.language` + 原生持久化承担。
+
+因此本文档自 §2 起描述的均为**现行**实现；`rust-i18n` / `.yml` / `t!` 宏 / iced
+「每帧重建视图」等表述属历史方案，不再适用。
 
 ---
 
-## 10. 测试与质量门禁
+## 9. 选型权衡：内联表 vs rust-i18n vs Fluent
 
-1. **键一致性测试**（`tests/i18n_keys.rs`）：解析两个 YAML，断言键集合完全相等（防止漏翻 / 多余键）。
-2. **占位符一致性**：对每个键，断言各语言中 `%{...}` 占位符集合相同。
-3. **默认语言断言**：未设置时 `t!("welcome.sign_in") == "Sign in with GitHub"`。
-4. **无残留硬编码**（可选 lint）：grep `text("…非 ASCII…")` 在 `src/` 应为空。
-5. 字体：CJK 需 `PingFang SC`（macOS）/ `Noto Sans CJK SC`（Linux）覆盖，已在 `main.rs` 设默认字体；切到中文时验证无豆腐块。
+| 维度 | 内联静态表（采用） | rust-i18n | Fluent |
+|---|---|---|---|
+| wasm 适配 | 原生契合（纯 Rust 数据） | 文件内嵌可用，但偏重 | 偏重 |
+| 复数 / 语法格 | 不支持 | 不支持 | 支持 |
+| 插值 | 调用点 `format!` 手工 | `t!` 具名占位符 | ICU 级 |
+| 依赖 / 体积 | 零额外依赖 | 一个 crate | 较大 |
+| 适配本项目 | 文案少、无复数，最契合 | 规模够但收益不足 | 当前过重 |
+
+**决策**：当前文案简单、无复数需求、且运行在 wasm，内联表性价比最高。若未来出现大量
+动态插值或复数 / 格变，再评估迁移到 `rust-i18n`（点号命名规范已为迁移留好结构）或 Fluent。
+
+---
+
+## 10. 质量约束
+
+1. **键集一致性**：新增文案必须同时补 `EN` 与 `ZH`；缺键会在 UI 显形（回退英文或 `⟨missing⟩`）。
+   当前靠 review 保证；如需自动化，可加一个比较两表键集的单元测试。
+2. **无残留硬编码**：前端 `view!` 中面向用户的字符串必须走 `t(key)`，不得硬编码（含错误前缀）。
+3. **CJK 字体**：webview 走系统字体栈，中文依赖系统已装 CJK 字体；如需跨平台像素级一致，
+   后续可在前端 CSS 内嵌 Noto Sans SC（本期不做）。
 
 ---
 
 ## 11. 风险
 
-- **字体缺失致中文豆腐块**：依赖系统 CJK 字体；若需跨平台像素级一致，后续可内嵌 Noto Sans SC（约 +8MB，本期不做）。
-- **品牌名误译**：`app.brand` 入词条但中英一致，评审时确认是否需要本地化。
-- **错误细节英文外泄给中文用户**：属有意为之（§6），技术细节保留英文利于排查；用户可读前缀已本地化。
+- **字体缺失致中文豆腐块**：依赖系统 CJK 字体。webview 环境下一般由系统字体覆盖；
+  必要时前端 CSS 指定字体族或内嵌字体。
+- **错误细节英文外泄给中文用户**：属有意为之（§5），技术细节保留英文利于排查。
+- **键一致性靠人工**：放弃了旧的 CI 键集测试；规模再增时应补回自动化检查。
