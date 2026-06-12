@@ -32,7 +32,11 @@ pub async fn invoke<A: Serialize, R: DeserializeOwned>(cmd: &str, args: &A) -> R
 /// from every command), which arrives as a JS string.
 fn error_to_string(err: JsValue) -> String {
     err.as_string()
-        .or_else(|| js_sys::JSON::stringify(&err).ok().and_then(|s| s.as_string()))
+        .or_else(|| {
+            js_sys::JSON::stringify(&err)
+                .ok()
+                .and_then(|s| s.as_string())
+        })
         .unwrap_or_else(|| "Unknown error from backend".to_string())
 }
 

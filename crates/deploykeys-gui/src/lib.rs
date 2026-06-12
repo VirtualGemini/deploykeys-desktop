@@ -64,7 +64,12 @@ enum PollDto {
 /// active session (the app is single-account today).
 #[tauri::command]
 async fn get_session(state: State<'_, AppState>) -> Result<Option<AccountDto>, String> {
-    let accounts = state.db.accounts().list_all().await.map_err(|e| e.to_string())?;
+    let accounts = state
+        .db
+        .accounts()
+        .list_all()
+        .await
+        .map_err(|e| e.to_string())?;
     Ok(accounts.into_iter().next().map(|a| AccountDto {
         login: a.login,
         avatar_url: a.avatar_url,
@@ -94,7 +99,10 @@ async fn set_language(state: State<'_, AppState>, code: String) -> Result<(), St
 #[tauri::command]
 async fn start_github_auth() -> Result<DeviceCodeDto, String> {
     let client = DeviceFlowClient::new(github_client_id()).map_err(|e| e.to_string())?;
-    let code = client.request_device_code().await.map_err(|e| e.to_string())?;
+    let code = client
+        .request_device_code()
+        .await
+        .map_err(|e| e.to_string())?;
     Ok(DeviceCodeDto {
         device_code: code.device_code,
         user_code: code.user_code,
@@ -112,7 +120,11 @@ async fn poll_github_auth(
     device_code: String,
 ) -> Result<PollDto, String> {
     let client = DeviceFlowClient::new(github_client_id()).map_err(|e| e.to_string())?;
-    match client.poll_for_token(&device_code).await.map_err(|e| e.to_string())? {
+    match client
+        .poll_for_token(&device_code)
+        .await
+        .map_err(|e| e.to_string())?
+    {
         PollResult::Pending => Ok(PollDto::Pending),
         PollResult::SlowDown => Ok(PollDto::SlowDown),
         PollResult::Authorized(tokens) => {
@@ -190,11 +202,9 @@ async fn init_database() -> Result<Database, Box<dyn std::error::Error>> {
             for suffix in ["", "-wal", "-shm"] {
                 let legacy = data_dir.join(format!("deplock.db{suffix}"));
                 if legacy.exists() {
-                    let _ = tokio::fs::rename(
-                        &legacy,
-                        data_dir.join(format!("deploykeys.db{suffix}")),
-                    )
-                    .await;
+                    let _ =
+                        tokio::fs::rename(&legacy, data_dir.join(format!("deploykeys.db{suffix}")))
+                            .await;
                 }
             }
         }

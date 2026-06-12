@@ -48,7 +48,8 @@ deploykeys-desktop/
 │       │   ├── api.rs         # IPC 命令的 UI 侧 DTO 与封装
 │       │   ├── tauri.rs       # window.__TAURI__ invoke 桥
 │       │   ├── i18n.rs        # 内联词条表 + 响应式 locale
-│       │   ├── screens/       # Welcome / OAuth 界面
+│       │   ├── theme.rs       # 全局主题信号 + .dark 切换（跟随系统）
+│       │   ├── screens/       # OAuth 设备流界面
 │       │   └── main.rs        # mount_to_body
 │       ├── styles/            # Tailwind 输入/输出 CSS
 │       ├── index.html         # Trunk 入口

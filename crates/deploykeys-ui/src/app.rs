@@ -225,10 +225,7 @@ fn Main(
 }
 
 #[component]
-fn NavItem(
-    #[prop(into)] label: Signal<&'static str>,
-    active: bool,
-) -> impl IntoView {
+fn NavItem(#[prop(into)] label: Signal<&'static str>, active: bool) -> impl IntoView {
     let class = if active {
         "py-1.5 px-3 text-sm font-medium rounded-lg bg-bg text-content"
     } else {
@@ -258,10 +255,8 @@ fn copy_to_clipboard(text: &str) {
 async fn sleep_secs(secs: u64) {
     let promise = js_sys::Promise::new(&mut |resolve, _reject| {
         let window = web_sys::window().expect("window exists");
-        let _ = window.set_timeout_with_callback_and_timeout_and_arguments_0(
-            &resolve,
-            (secs * 1000) as i32,
-        );
+        let _ = window
+            .set_timeout_with_callback_and_timeout_and_arguments_0(&resolve, (secs * 1000) as i32);
     });
     let _ = wasm_bindgen_futures::JsFuture::from(promise).await;
 }

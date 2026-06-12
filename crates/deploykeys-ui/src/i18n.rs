@@ -52,10 +52,7 @@ fn lookup(loc: Locale, key: &str) -> Option<&'static str> {
         Locale::En => EN,
         Locale::Zh => ZH,
     };
-    table
-        .iter()
-        .find(|(k, _)| *k == key)
-        .map(|(_, v)| *v)
+    table.iter().find(|(k, _)| *k == key).map(|(_, v)| *v)
 }
 
 const EN: &[(&str, &str)] = &[
@@ -81,7 +78,10 @@ const EN: &[(&str, &str)] = &[
     ("oauth.copy", "Copy"),
     ("oauth.copied", "Copied"),
     ("session.not_signed_in", "Not signed in"),
-    ("screen.placeholder_phase4", "This screen will be implemented in Phase 4"),
+    (
+        "screen.placeholder_phase4",
+        "This screen will be implemented in Phase 4",
+    ),
     ("common.cancel", "Cancel"),
     ("common.sign_out", "Sign out"),
     ("settings.language", "Language"),
@@ -98,7 +98,10 @@ const ZH: &[(&str, &str)] = &[
     ("welcome.sign_in", "使用 GitHub 登录"),
     ("welcome.signing_in", "正在连接…"),
     ("oauth.title", "连接 GitHub"),
-    ("oauth.instruction", "在浏览器中授权 DeployKeys 以完成登录。"),
+    (
+        "oauth.instruction",
+        "在浏览器中授权 DeployKeys 以完成登录。",
+    ),
     ("oauth.step_visit", "打开此链接"),
     ("oauth.step_code", "输入此代码"),
     ("oauth.waiting", "正在等待授权…"),

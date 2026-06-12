@@ -45,16 +45,17 @@
   --color-on-primary: #ffffff;  /* 主色之上的文字 */
 }
 
-/* 暗色覆盖：令牌同名，换暗色值。切 .dark 即整体翻转。 */
+/* 暗色覆盖：令牌同名，换暗色值。切 .dark 即整体翻转。
+   中性色用 neutral 真灰系（偏黑），不带蓝调；主色蓝是品牌强调色，保留。 */
 .dark {
-  --color-bg: #0f172a;
-  --color-surface: #1e293b;
-  --color-content: #f1f5f9;
-  --color-muted: #94a3b8;
-  --color-border: #334155;
+  --color-bg: #0a0a0a;
+  --color-surface: #171717;
+  --color-content: #f5f5f5;
+  --color-muted: #a3a3a3;
+  --color-border: #2a2a2a;
   --color-primary: #3b82f6;
   --color-primary-hover: #60a5fa;
-  --color-primary-soft: #1e3a5f;
+  --color-primary-soft: #1e2a3a;
   --color-on-primary: #ffffff;
 }
 ```
