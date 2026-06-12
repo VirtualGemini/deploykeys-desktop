@@ -1,0 +1,60 @@
+[workspace]
+members = ["crates/deploykeys-core", "crates/deploykeys-gui", "crates/deploykeys-ui"]
+# The UI crate is CSR wasm, built by Trunk with --target wasm32-unknown-unknown.
+# Keeping it out of default-members means a bare `cargo build`/`cargo test` at
+# the root only touches the native crates (core + the Tauri backend), so the
+# wasm-only dependency tree never gets pulled into a host build.
+default-members = ["crates/deploykeys-core", "crates/deploykeys-gui"]
+resolver = "2"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+authors = ["DeployKeys Contributors"]
+license = "MIT"
+
+[workspace.dependencies]
+# Async runtime
+tokio = { version = "1.40", features = ["full"] }
+
+# Error handling
+anyhow = "1.0"
+thiserror = "1.0"
+
+# Serialization
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+# Time
+chrono = { version = "0.4", features = ["serde"] }
+
+# Database
+sqlx = { version = "0.8", features = ["runtime-tokio-rustls", "sqlite", "chrono", "migrate"] }
+
+# HTTP client
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+
+# SSH
+russh = "0.45"
+russh-keys = "0.45"
+
+# SSH Key generation
+# Note: the `ecdsa` feature only enables SEC1 encoding; key *generation*
+# requires the per-curve features p256/p384/p521.
+ssh-key = { version = "0.6", features = ["ed25519", "rsa", "p256", "p384", "p521", "std"] }
+
+# System credentials
+keyring = { version = "3.2", features = ["apple-native", "linux-native"] }
+
+# Logging
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# Desktop shell (Tauri 2). The webview frontend is the separate
+# `deploykeys-ui` crate, built to wasm by Trunk.
+tauri = { version = "2", features = [] }
+tauri-build = { version = "2", features = [] }
+open = "5"
+
+# Utilities
+dirs = "5.0"

@@ -1,0 +1,69 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+  # sqlx compile-time macros validate queries against this database.
+  DATABASE_URL: sqlite:deploykeys.db
+
+jobs:
+  lint:
+    name: Format + Clippy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - name: Install GUI system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libxkbcommon-dev libwayland-dev libx11-dev libxcb1-dev
+      - name: Create compile-time check database
+        run: |
+          rm -f deploykeys.db
+          for m in migrations/*.sql; do sqlite3 deploykeys.db < "$m"; done
+      - name: Check formatting
+        run: cargo fmt --all -- --check
+      - name: Clippy (deny warnings)
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+  test:
+    name: Test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Install GUI system dependencies (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libxkbcommon-dev libwayland-dev libx11-dev libxcb1-dev
+      - name: Create compile-time check database
+        run: |
+          rm -f deploykeys.db
+          for m in migrations/*.sql; do sqlite3 deploykeys.db < "$m"; done
+      - name: Run tests
+        run: cargo test --workspace
+
+  audit:
+    name: Security Audit
+    runs-on: ubuntu-latest
+    # Advisory-only: new CVEs in transitive deps should not block PRs until
+    # a triage process exists. Tighten once the project stabilizes.
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: rustsec/audit-check@v2
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}

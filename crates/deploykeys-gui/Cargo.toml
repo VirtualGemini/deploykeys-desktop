@@ -1,0 +1,29 @@
+[package]
+name = "deploykeys-gui"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[lib]
+name = "deploykeys_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[[bin]]
+name = "deploykeys"
+path = "src/main.rs"
+
+[build-dependencies]
+tauri-build.workspace = true
+
+[dependencies]
+deploykeys-core = { path = "../deploykeys-core" }
+
+tauri.workspace = true
+tokio.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+dirs.workspace = true
+open.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true

@@ -1,0 +1,14 @@
+[build]
+target = "index.html"
+
+# Generate Tailwind CSS before Trunk bundles assets. Uses the pinned standalone
+# binary in tools/ (v4) so the build never depends on a Node toolchain or a
+# floating Tailwind version. The binary scans src/**/*.rs (via @source in
+# styles/input.css) and emits the minified stylesheet Trunk then picks up.
+[[hooks]]
+stage = "pre_build"
+command = "sh"
+command_arguments = [
+    "-c",
+    "../../tools/tailwindcss -i styles/input.css -o styles/output.css --minify",
+]

@@ -1,0 +1,26 @@
+[package]
+name = "deploykeys-core"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[dependencies]
+tokio.workspace = true
+thiserror.workspace = true
+serde.workspace = true
+chrono.workspace = true
+sqlx.workspace = true
+reqwest.workspace = true
+ssh-key.workspace = true
+keyring.workspace = true
+tracing.workspace = true
+
+# Additional dependencies
+async-trait = "0.1"
+rand = "0.8"
+regex = "1.10"
+
+[dev-dependencies]
+mockito = "1.5"
+tempfile = "3.13"

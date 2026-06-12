@@ -1,0 +1,21 @@
+[package]
+name = "deploykeys-ui"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[dependencies]
+leptos = { version = "0.6", features = ["csr"] }
+serde = { workspace = true }
+serde_json = { workspace = true }
+serde-wasm-bindgen = "0.6"
+wasm-bindgen = "0.2"
+wasm-bindgen-futures = "0.4"
+js-sys = "0.3"
+web-sys = { version = "0.3", features = ["Window", "Navigator", "Clipboard"] }
+console_error_panic_hook = "0.1"
+
+[[bin]]
+name = "deploykeys-ui"
+path = "src/main.rs"

@@ -1,0 +1,4 @@
+@import "tailwindcss";
+
+/* Scan the Rust sources for utility classes used inside view! macros. */
+@source "../src/**/*.rs";
