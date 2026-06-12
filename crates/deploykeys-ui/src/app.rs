@@ -4,18 +4,17 @@
 use crate::api;
 use crate::i18n::{self, t, Locale};
 use crate::screens::oauth::OAuth;
-use crate::screens::welcome::Welcome;
+use crate::theme::{self, Theme};
 use leptos::*;
 use wasm_bindgen_futures::spawn_local;
 
 #[derive(Clone, PartialEq)]
 enum Screen {
-    Welcome,
+    Main,
     OAuth {
         user_code: String,
         verification_uri: String,
     },
-    Repos,
 }
 
 /// A pending device-flow session: the code to poll with and the cadence.
@@ -27,25 +26,28 @@ struct AuthSession {
 
 #[component]
 pub fn App() -> impl IntoView {
-    // Provide the reactive locale at the root. `provide_context` must run inside
-    // a reactive owner, so it lives here rather than in `main`. The startup guess
-    // comes from the webview language; the persisted preference (if any)
-    // overrides it once the session bootstrap below runs.
+    // Provide the reactive locale and theme at the root. `provide_context` must
+    // run inside a reactive owner, so they live here rather than in `main`. The
+    // startup locale guess comes from the webview language; the persisted
+    // preference (if any) overrides it once the session bootstrap below runs.
+    // Theme defaults to System (follows the OS prefers-color-scheme).
     i18n::provide_locale(detect_locale());
+    theme::provide_theme(Theme::System);
 
-    let screen = RwSignal::new(Screen::Welcome);
+    let screen = RwSignal::new(Screen::Main);
     let signing_in = RwSignal::new(false);
     let error = RwSignal::new(None::<String>);
     let account = RwSignal::new(None::<api::Account>);
 
-    // Bootstrap: load persisted language + session before first paint settles.
+    // Bootstrap: load persisted language + session. The app opens directly on
+    // the main screen; a found session just populates the account (showing the
+    // signed-in identity), it no longer gates which screen is shown.
     spawn_local(async move {
         if let Ok(Some(code)) = api::get_language().await {
             i18n::locale().set(Locale::from_code(&code));
         }
         if let Ok(Some(acct)) = api::get_session().await {
             account.set(Some(acct));
-            screen.set(Screen::Repos);
         }
     });
 
@@ -82,7 +84,7 @@ pub fn App() -> impl IntoView {
     };
 
     let cancel_auth = move |_| {
-        screen.set(Screen::Welcome);
+        screen.set(Screen::Main);
         error.set(None);
     };
 
@@ -98,8 +100,9 @@ pub fn App() -> impl IntoView {
 
     view! {
         {move || match screen.get() {
-            Screen::Welcome => view! {
-                <Welcome
+            Screen::Main => view! {
+                <Main
+                    account=account
                     signing_in=signing_in
                     error=error
                     on_sign_in=Callback::new(start_auth)
@@ -113,9 +116,6 @@ pub fn App() -> impl IntoView {
                     on_copy=Callback::new(copy)
                     on_cancel=Callback::new(cancel_auth)
                 />
-            }.into_view(),
-            Screen::Repos => view! {
-                <Placeholder account=account screen=screen />
             }.into_view(),
         }}
     }
@@ -150,39 +150,34 @@ fn poll_loop(
             }
             Ok(api::Poll::Authorized { account: acct }) => {
                 account.set(Some(acct));
-                screen.set(Screen::Repos);
+                screen.set(Screen::Main);
             }
             Err(e) => {
                 error.set(Some(e));
-                screen.set(Screen::Welcome);
+                screen.set(Screen::Main);
             }
         }
     });
 }
 
-/// Placeholder for the post-login app (repos / targets / keys / forge), with a
-/// top nav and the signed-in identity.
+/// The main app screen (repos / targets / keys / forge), with a top nav. The
+/// top-right corner shows the signed-in identity + sign out when authenticated,
+/// or a "sign in with GitHub" button that starts the device flow otherwise.
 #[component]
-fn Placeholder(
+fn Main(
     account: RwSignal<Option<api::Account>>,
-    screen: RwSignal<Screen>,
+    #[prop(into)] signing_in: Signal<bool>,
+    #[prop(into)] error: Signal<Option<String>>,
+    on_sign_in: Callback<()>,
 ) -> impl IntoView {
     let sign_out = move |_| {
-        spawn_local(async move {
-            // No backend sign-out command yet; just drop local state.
-            screen.set(Screen::Welcome);
-        });
-    };
-    let _ = account;
-
-    let signed_in_as = move || match account.get() {
-        Some(acct) => format!("@{}", acct.login),
-        None => t("session.not_signed_in").to_string(),
+        // No backend sign-out command yet; just drop local state.
+        account.set(None);
     };
 
     view! {
-        <div class="min-h-screen w-full bg-slate-50">
-            <header class="sticky top-0 inset-x-0 z-50 bg-white border-b border-slate-200">
+        <div class="min-h-screen w-full bg-bg text-content">
+            <header class="sticky top-0 inset-x-0 z-50 bg-surface border-b border-border">
                 <nav class="max-w-4xl mx-auto flex items-center justify-between px-6 h-14">
                     <div class="flex items-center gap-1">
                         <NavItem label=move || t("nav.repos") active=true />
@@ -191,20 +186,39 @@ fn Placeholder(
                         <NavItem label=move || t("nav.forge") active=false />
                     </div>
                     <div class="flex items-center gap-3">
-                        <span class="text-sm text-slate-500">{signed_in_as}</span>
-                        <button
-                            type="button"
-                            class="py-1.5 px-3 text-xs font-medium rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-100 focus:outline-none transition-colors"
-                            on:click=sign_out
-                        >
-                            {move || t("common.sign_out")}
-                        </button>
+                        {move || match account.get() {
+                            Some(acct) => view! {
+                                <span class="text-sm text-muted">{format!("@{}", acct.login)}</span>
+                                <button
+                                    type="button"
+                                    class="py-1.5 px-3 text-xs font-medium rounded-lg border border-border text-muted hover:bg-bg focus:outline-none transition-colors"
+                                    on:click=sign_out
+                                >
+                                    {move || t("common.sign_out")}
+                                </button>
+                            }.into_view(),
+                            None => view! {
+                                <button
+                                    type="button"
+                                    class="py-1.5 px-3 text-xs font-medium rounded-lg bg-primary text-on-primary hover:bg-primary-hover focus:outline-none disabled:opacity-50 disabled:pointer-events-none transition-colors"
+                                    prop:disabled=signing_in
+                                    on:click=move |_| on_sign_in.call(())
+                                >
+                                    {move || if signing_in.get() { t("welcome.signing_in") } else { t("welcome.sign_in") }}
+                                </button>
+                            }.into_view(),
+                        }}
                     </div>
                 </nav>
             </header>
             <main class="max-w-4xl mx-auto px-6 py-12">
-                <h1 class="text-2xl font-semibold text-slate-800">{move || t("nav.repos")}</h1>
-                <p class="mt-2 text-sm text-slate-500">{move || t("screen.placeholder_phase4")}</p>
+                <h1 class="text-2xl font-semibold text-content">{move || t("nav.repos")}</h1>
+                <p class="mt-2 text-sm text-muted">{move || t("screen.placeholder_phase4")}</p>
+                <Show when=move || error.get().is_some()>
+                    <div class="w-full mt-4 p-3 text-sm rounded-lg border border-red-200 bg-red-50 text-red-700 text-left dark:border-red-900 dark:bg-red-950 dark:text-red-300">
+                        {move || error.get().unwrap_or_default()}
+                    </div>
+                </Show>
             </main>
         </div>
     }
@@ -216,9 +230,9 @@ fn NavItem(
     active: bool,
 ) -> impl IntoView {
     let class = if active {
-        "py-1.5 px-3 text-sm font-medium rounded-lg bg-slate-100 text-slate-800"
+        "py-1.5 px-3 text-sm font-medium rounded-lg bg-bg text-content"
     } else {
-        "py-1.5 px-3 text-sm font-medium rounded-lg text-slate-500 hover:bg-slate-100 transition-colors"
+        "py-1.5 px-3 text-sm font-medium rounded-lg text-muted hover:bg-bg transition-colors"
     };
     view! { <button type="button" class=class>{move || label.get()}</button> }
 }

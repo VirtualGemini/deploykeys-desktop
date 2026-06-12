@@ -122,8 +122,9 @@ deploykeys-desktop/
 │       ├── src/app.rs        # 根组件、屏幕状态、设备流轮询
 │       ├── src/tauri.rs      # IPC invoke 桥
 │       ├── src/i18n.rs       # 内联词条表 + 响应式 locale
-│       ├── src/screens/      # Welcome / OAuth 界面
-│       └── styles/           # Tailwind 输入/输出 CSS
+│       ├── src/theme.rs      # 响应式主题信号 + .dark 切换（见 docs/THEME_DESIGN.md）
+│       ├── src/screens/      # OAuth 界面
+│       └── styles/           # Tailwind 输入/输出 CSS（input.css = 全局色板）
 │
 ├── migrations/                # 数据库 schema
 └── tools/                     # 固定的 Tailwind v4 standalone 二进制

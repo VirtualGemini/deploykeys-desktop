@@ -3,6 +3,7 @@ mod app;
 mod i18n;
 mod screens;
 mod tauri;
+mod theme;
 
 use app::App;
 use leptos::*;

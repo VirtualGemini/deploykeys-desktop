@@ -5,10 +5,10 @@
   "identifier": "co.deploykeys.desktop",
   "build": {
     "frontendDist": "../deploykeys-ui/dist",
-    "devUrl": "http://localhost:8080",
+    "devUrl": "http://localhost:8000",
     "beforeDevCommand": {
       "cwd": "../deploykeys-ui",
-      "script": "trunk serve --port 8080"
+      "script": "trunk serve --port 8000"
     },
     "beforeBuildCommand": {
       "cwd": "../deploykeys-ui",

@@ -16,20 +16,20 @@ pub fn OAuth(
     on_cancel: Callback<()>,
 ) -> impl IntoView {
     view! {
-        <div class="min-h-screen w-full flex flex-col items-center justify-center px-6 bg-gradient-to-b from-white to-slate-50 gap-5">
-            <div class="w-full max-w-md bg-white border border-slate-200 rounded-2xl shadow-xl p-7 flex flex-col gap-5">
+        <div class="min-h-screen w-full flex flex-col items-center justify-center px-6 bg-bg gap-5">
+            <div class="w-full max-w-md bg-surface border border-border rounded-2xl shadow-xl p-7 flex flex-col gap-5">
                 <div class="flex flex-col gap-1">
-                    <h2 class="text-xl font-semibold text-slate-800">{move || t("oauth.title")}</h2>
-                    <p class="text-sm text-slate-500">{move || t("oauth.instruction")}</p>
+                    <h2 class="text-xl font-semibold text-content">{move || t("oauth.title")}</h2>
+                    <p class="text-sm text-muted">{move || t("oauth.instruction")}</p>
                 </div>
 
                 // Verification URL field with open + copy actions.
                 <div class="flex flex-col gap-1.5">
-                    <label class="text-xs font-medium text-slate-500">{move || t("oauth.step_visit")}</label>
+                    <label class="text-xs font-medium text-muted">{move || t("oauth.step_visit")}</label>
                     <div class="flex items-stretch gap-2">
                         <button
                             type="button"
-                            class="flex-1 min-w-0 text-left py-2.5 px-3 text-sm rounded-lg border border-slate-200 bg-slate-50 text-blue-600 truncate hover:bg-slate-100 focus:outline-none transition-colors"
+                            class="flex-1 min-w-0 text-left py-2.5 px-3 text-sm rounded-lg border border-border bg-bg text-primary truncate hover:opacity-80 focus:outline-none transition-opacity"
                             on:click={
                                 let uri = verification_uri.clone();
                                 move |_| on_open.call(uri.clone())
@@ -39,7 +39,7 @@ pub fn OAuth(
                         </button>
                         <button
                             type="button"
-                            class="shrink-0 py-2.5 px-3 text-xs font-medium rounded-lg border border-blue-200 bg-blue-50 text-blue-600 hover:bg-blue-100 focus:outline-none transition-colors"
+                            class="shrink-0 py-2.5 px-3 text-xs font-medium rounded-lg border border-border bg-primary-soft text-primary hover:opacity-80 focus:outline-none transition-opacity"
                             on:click={
                                 let uri = verification_uri.clone();
                                 move |_| on_copy.call(uri.clone())
@@ -52,14 +52,14 @@ pub fn OAuth(
 
                 // User code field with copy action.
                 <div class="flex flex-col gap-1.5">
-                    <label class="text-xs font-medium text-slate-500">{move || t("oauth.step_code")}</label>
+                    <label class="text-xs font-medium text-muted">{move || t("oauth.step_code")}</label>
                     <div class="flex items-center gap-2">
-                        <div class="flex-1 py-2.5 px-3 rounded-lg border border-slate-200 bg-slate-50 font-mono text-2xl tracking-widest text-slate-800">
+                        <div class="flex-1 py-2.5 px-3 rounded-lg border border-border bg-bg font-mono text-2xl tracking-widest text-content">
                             {user_code.clone()}
                         </div>
                         <button
                             type="button"
-                            class="shrink-0 py-2.5 px-3 text-xs font-medium rounded-lg border border-blue-200 bg-blue-50 text-blue-600 hover:bg-blue-100 focus:outline-none transition-colors"
+                            class="shrink-0 py-2.5 px-3 text-xs font-medium rounded-lg border border-border bg-primary-soft text-primary hover:opacity-80 focus:outline-none transition-opacity"
                             on:click={
                                 let code = user_code.clone();
                                 move |_| on_copy.call(code.clone())
@@ -70,15 +70,15 @@ pub fn OAuth(
                     </div>
                 </div>
 
-                <div class="flex items-center gap-2 text-sm text-slate-500">
-                    <span class="inline-block size-2 rounded-full bg-blue-500 animate-pulse"></span>
+                <div class="flex items-center gap-2 text-sm text-muted">
+                    <span class="inline-block size-2 rounded-full bg-primary animate-pulse"></span>
                     {move || t("oauth.waiting")}
                 </div>
             </div>
 
             <button
                 type="button"
-                class="py-2 px-5 text-sm rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-100 focus:outline-none transition-colors"
+                class="py-2 px-5 text-sm rounded-lg border border-border text-muted hover:bg-surface focus:outline-none transition-colors"
                 on:click=move |_| on_cancel.call(())
             >
                 {move || t("common.cancel")}

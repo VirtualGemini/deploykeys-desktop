@@ -12,10 +12,11 @@ keyring 引用、token 等机密永不跨越 IPC 边界。
 ```
 ┌──────────────────────────────────────────────────────────┐
 │              deploykeys-ui (前端 / Leptos CSR wasm)          │
-│  ┌─────────────┐  ┌──────────────┐  ┌──────────────┐    │
-│  │   Welcome   │  │    OAuth      │  │  Placeholder │    │
-│  │   Screen    │  │ (Device Flow) │  │  (Phase 4)   │    │
-│  └─────────────┘  └──────────────┘  └──────────────┘    │
+│  ┌──────────────┐              ┌──────────────┐          │
+│  │     Main     │              │    OAuth      │          │
+│  │  (主界面/占位) │◀────顶栏登录──▶│ (Device Flow) │          │
+│  └──────────────┘              └──────────────┘          │
+│   全局主题（theme.rs，.dark on <html>）+ i18n（locale）    │
 │         跑在 webview 中，无 deploykeys-core 依赖            │
 └──────────────────────────┬───────────────────────────────┘
                            │  Tauri IPC（window.__TAURI__.core.invoke）
@@ -59,12 +60,16 @@ keyring 引用、token 等机密永不跨越 IPC 边界。
 
 纯 CSR（client-side rendered）wasm，用 Leptos 0.6 写，由 Trunk 构建。
 样式走 Tailwind v4（tools/ 下固定的 standalone 二进制，无 Node 依赖），
-组件风格抄自 Preline 的 utility 类。
+组件风格抄自 Preline 的 utility 类。颜色一律走全局语义令牌（`bg-bg`、
+`text-content`、`bg-primary` 等），不写死 `slate-*`/`blue-*`；明暗主题切换
+由根组件统一管理，详见 [docs/THEME_DESIGN.md](docs/THEME_DESIGN.md)。
 
 **职责**：
 - 用户交互与界面渲染（Leptos `view!` + 响应式信号）
 - 用户输入验证（UI 层面）
 - UI 状态管理（`RwSignal`，如当前屏幕、登录中标志、错误信息）
+- 全局主题状态：根组件 `provide_theme` 一个响应式 `Theme` 信号，默认跟随
+  系统（`prefers-color-scheme`），与 i18n 的 locale 信号同构
 - 经 Tauri IPC 调用原生命令并解析回传的 DTO
 
 **依赖**：
@@ -204,7 +209,7 @@ impl AccountRepository {
 ### GitHub 设备流登录（现已落地的代表性数据流）
 
 ```
-用户点击 "Sign in with GitHub"（前端 Welcome 屏）
+用户点击 "Sign in with GitHub"（前端主界面顶栏，未登录时显示）
     │
     ▼
 前端 spawn_local → api::start_github_auth()
