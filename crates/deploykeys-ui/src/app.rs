@@ -42,6 +42,28 @@ pub fn App() -> impl IntoView {
     let error = RwSignal::new(None::<String>);
     let account = RwSignal::new(None::<api::Account>);
 
+    // Sidebar state: lifted to App level so it persists across screen changes
+    let manual_sidebar_collapsed = RwSignal::new(None::<bool>);
+    let auto_sidebar_collapsed = RwSignal::new(should_auto_collapse_sidebar());
+    let sidebar_collapsed = Signal::derive(move || {
+        manual_sidebar_collapsed
+            .get()
+            .unwrap_or_else(|| auto_sidebar_collapsed.get())
+    });
+
+    let resize_handle = window_event_listener(ev::resize, move |_| {
+        let next_auto_collapsed = should_auto_collapse_sidebar();
+        if next_auto_collapsed != auto_sidebar_collapsed.get_untracked() {
+            manual_sidebar_collapsed.set(None);
+        }
+        auto_sidebar_collapsed.set(next_auto_collapsed);
+    });
+    on_cleanup(move || resize_handle.remove());
+
+    let sidebar_toggle_callback = Callback::new(move |_| {
+        manual_sidebar_collapsed.set(Some(!sidebar_collapsed.get_untracked()));
+    });
+
     // Bootstrap: load persisted language + session. The app opens directly on
     // the main screen; a found session just populates the account (showing the
     // signed-in identity), it no longer gates which screen is shown.
@@ -89,6 +111,7 @@ pub fn App() -> impl IntoView {
     let cancel_auth = move |_| {
         screen.set(Screen::Main);
         error.set(None);
+        signing_in.set(false);
     };
 
     let open_url = move |url: String| {
@@ -109,6 +132,8 @@ pub fn App() -> impl IntoView {
                     signing_in=signing_in
                     error=error
                     on_sign_in=Callback::new(start_auth)
+                    sidebar_collapsed=sidebar_collapsed
+                    sidebar_toggle=sidebar_toggle_callback
                 />
             }.into_view(),
             Screen::OAuth { user_code, verification_uri } => view! {
@@ -172,6 +197,8 @@ fn Main(
     #[prop(into)] signing_in: Signal<bool>,
     #[prop(into)] error: Signal<Option<String>>,
     on_sign_in: Callback<()>,
+    #[prop(into)] sidebar_collapsed: Signal<bool>,
+    sidebar_toggle: Callback<()>,
 ) -> impl IntoView {
     let sign_out = move |_| {
         // No backend sign-out command yet; just drop local state.
@@ -182,26 +209,6 @@ fn Main(
     // header trigger). When open, a full-screen modal overlay with a centered
     // search box + filtered action list appears.
     let palette_open = RwSignal::new(false);
-    let manual_sidebar_collapsed = RwSignal::new(None::<bool>);
-    let auto_sidebar_collapsed = RwSignal::new(should_auto_collapse_sidebar());
-    let sidebar_collapsed = Signal::derive(move || {
-        manual_sidebar_collapsed
-            .get()
-            .unwrap_or_else(|| auto_sidebar_collapsed.get())
-    });
-
-    let resize_handle = window_event_listener(ev::resize, move |_| {
-        let next_auto_collapsed = should_auto_collapse_sidebar();
-        if next_auto_collapsed != auto_sidebar_collapsed.get_untracked() {
-            manual_sidebar_collapsed.set(None);
-        }
-        auto_sidebar_collapsed.set(next_auto_collapsed);
-    });
-    on_cleanup(move || resize_handle.remove());
-
-    let toggle_sidebar = move |_| {
-        manual_sidebar_collapsed.set(Some(!sidebar_collapsed.get_untracked()));
-    };
 
     view! {
         // Standard web-admin layout: a top title bar, then a body row split into
@@ -256,9 +263,9 @@ fn Main(
                 // (sign in / signed-in identity + sign out) pinned to the bottom.
                 <aside class=move || {
                     if sidebar_collapsed.get() {
-                        "shrink-0 w-[68px] bg-surface flex flex-col overflow-y-auto overflow-x-hidden transition-[width] duration-300 [transition-timing-function:cubic-bezier(0.22,1,0.36,1)]"
+                        "shrink-0 w-[80px] bg-surface flex flex-col overflow-y-auto overflow-x-hidden transition-[width] duration-300 [transition-timing-function:cubic-bezier(0.22,1,0.36,1)]"
                     } else {
-                        "shrink-0 w-[230px] bg-surface flex flex-col overflow-y-auto overflow-x-hidden transition-[width] duration-300 [transition-timing-function:cubic-bezier(0.22,1,0.36,1)]"
+                        "shrink-0 w-[210px] bg-surface flex flex-col overflow-y-auto overflow-x-hidden transition-[width] duration-300 [transition-timing-function:cubic-bezier(0.22,1,0.36,1)]"
                     }
                 }>
                     <nav class="flex flex-col gap-1 py-3 pl-2 pr-1">
@@ -271,66 +278,109 @@ fn Main(
                     // Spacer pushes the account block to the bottom.
                     <div class="flex-1"></div>
 
-                    // Account block: bottom of the sidebar, above a divider.
-                    <div class="shrink-0 py-3 pl-3 pr-1 border-t border-border">
+                    // Account/Sign in block: bottom of the sidebar, above a divider.
+                    <div class="shrink-0 py-3 pl-2 pr-1 border-t border-border">
                         {move || match account.get() {
                             Some(acct) => {
+                                // Signed in: show avatar + username, click to show dropdown
                                 let login = format!("@{}", acct.login);
-                                let identity_class = move || {
+                                let dropdown_open = RwSignal::new(false);
+                                let username_class = move || {
                                     if sidebar_collapsed.get() {
-                                        "flex-1 min-w-0 max-w-0 opacity-0 overflow-hidden whitespace-nowrap text-sm text-content transition-[max-width,opacity] duration-150"
+                                        "min-w-0 max-w-0 opacity-0 overflow-hidden whitespace-nowrap text-sm text-content transition-[max-width,opacity] duration-150"
                                     } else {
-                                        "flex-1 min-w-0 max-w-[10rem] opacity-100 truncate text-sm text-content transition-[max-width,opacity] duration-200"
-                                    }
-                                };
-                                let sign_out_class = move || {
-                                    if sidebar_collapsed.get() {
-                                        "ml-auto shrink-0 flex justify-center items-center size-8 rounded-lg text-muted opacity-0 pointer-events-none transition-opacity duration-150"
-                                    } else {
-                                        "ml-auto shrink-0 flex justify-center items-center size-8 rounded-lg text-muted opacity-100 hover:bg-bg hover:text-content focus:outline-none transition-opacity duration-200"
+                                        "min-w-0 max-w-[9rem] opacity-100 truncate text-sm text-content transition-[max-width,opacity] duration-200"
                                     }
                                 };
                                 view! {
-                                    <div class="w-full min-w-0 flex items-center gap-2 pl-[6px]">
-                                        <AccountAvatar account=acct.clone() />
-                                        <span class=identity_class>{login}</span>
+                                    <div class="pr-[7px] relative">
                                         <button
                                             type="button"
-                                            title=move || t("common.sign_out")
-                                            class=sign_out_class
-                                            on:click=sign_out
+                                            title=login.clone()
+                                            class="w-full flex items-center gap-2.5 h-10 pl-[16px] pr-3 rounded-lg hover:bg-bg transition-colors"
+                                            on:click=move |_| dropdown_open.update(|o| *o = !*o)
                                         >
-                                            <Icon name=IconName::SignOut class="size-4" />
+                                            <AccountAvatar account=acct.clone() />
+                                            <span class=username_class>{login}</span>
                                         </button>
+
+                                        <Show when=move || dropdown_open.get() && !sidebar_collapsed.get()>
+                                            // Click-outside backdrop
+                                            <div class="fixed inset-0 z-40" on:click=move |_| dropdown_open.set(false)></div>
+
+                                            // Dropdown menu
+                                            <div class="absolute bottom-full left-2 mb-2 z-50 w-[calc(100%-16px)] p-1 bg-surface border border-border rounded-xl shadow-xl">
+                                                <button
+                                                    type="button"
+                                                    class="w-full flex items-center gap-x-3 py-2 px-2.5 rounded-lg text-sm text-content hover:bg-bg focus:outline-none transition-colors"
+                                                    on:click=move |_| {
+                                                        dropdown_open.set(false);
+                                                        sign_out(());
+                                                    }
+                                                >
+                                                    <Icon name=IconName::SignOut class="size-4" />
+                                                    <span class="grow text-left">{move || t("common.sign_out")}</span>
+                                                </button>
+                                            </div>
+                                        </Show>
                                     </div>
                                 }.into_view()
                             },
                             None => {
-                                let label_class = move || {
-                                    if sidebar_collapsed.get() {
-                                        "max-w-0 opacity-0 overflow-hidden whitespace-nowrap transition-[max-width,opacity] duration-150"
-                                    } else {
-                                        "max-w-[10rem] opacity-100 whitespace-nowrap transition-[max-width,opacity] duration-200"
-                                    }
-                                };
+                                // Not signed in: show GitHub icon when collapsed, ghost button when expanded
+                                // Use two separate components with fade in/out for smooth transition
                                 view! {
-                                    <button
-                                        type="button"
-                                        title=move || if signing_in.get() { t("welcome.signing_in") } else { t("welcome.sign_in") }
-                                        class="w-full inline-flex justify-start items-center gap-x-2 h-10 pl-[14px] pr-4 overflow-hidden text-sm font-medium rounded-lg bg-primary text-on-primary hover:bg-primary-hover focus:outline-none disabled:opacity-50 disabled:pointer-events-none transition-colors duration-300"
-                                        prop:disabled=signing_in
-                                        on:click=move |_| on_sign_in.call(())
-                                    >
-                                        <Icon name=IconName::Github class="size-4" />
-                                        <span class=label_class>{move || if signing_in.get() { t("welcome.signing_in") } else { t("welcome.sign_in") }}</span>
-                                    </button>
+                                    <div class="pr-[7px] relative">
+                                        // Collapsed: icon only button
+                                        <button
+                                            type="button"
+                                            title=move || t("welcome.sign_in")
+                                            class=move || {
+                                                if sidebar_collapsed.get() {
+                                                    if signing_in.get() {
+                                                        "absolute inset-0 flex items-center justify-center h-10 rounded-lg text-content hover:bg-bg focus:outline-none transition-opacity duration-300 ease-out delay-150 opacity-50 pointer-events-none"
+                                                    } else {
+                                                        "absolute inset-0 flex items-center justify-center h-10 rounded-lg text-content hover:bg-bg focus:outline-none transition-opacity duration-300 ease-out delay-150 opacity-100"
+                                                    }
+                                                } else {
+                                                    "absolute inset-0 flex items-center justify-center h-10 rounded-lg text-content hover:bg-bg focus:outline-none transition-opacity duration-200 ease-in opacity-0 pointer-events-none"
+                                                }
+                                            }
+                                            prop:disabled=signing_in.get()
+                                            on:click=move |_| on_sign_in.call(())
+                                        >
+                                            <Icon name=IconName::Github class="size-7" />
+                                        </button>
+
+                                        // Expanded: ghost button with text
+                                        <button
+                                            type="button"
+                                            title=move || t("welcome.sign_in")
+                                            class=move || {
+                                                if sidebar_collapsed.get() {
+                                                    "w-full flex items-center justify-center gap-x-2 h-10 px-4 text-sm font-medium rounded-lg border border-border text-content hover:bg-bg focus:outline-none transition-opacity duration-200 ease-in opacity-0 pointer-events-none"
+                                                } else {
+                                                    if signing_in.get() {
+                                                        "w-full flex items-center justify-center gap-x-2 h-10 px-4 text-sm font-medium rounded-lg border border-border text-content hover:bg-bg focus:outline-none transition-opacity duration-300 ease-out delay-150 opacity-50 pointer-events-none"
+                                                    } else {
+                                                        "w-full flex items-center justify-center gap-x-2 h-10 px-4 text-sm font-medium rounded-lg border border-border text-content hover:bg-bg focus:outline-none transition-opacity duration-300 ease-out delay-150 opacity-100"
+                                                    }
+                                                }
+                                            }
+                                            prop:disabled=signing_in.get()
+                                            on:click=move |_| on_sign_in.call(())
+                                        >
+                                            <Icon name=IconName::Github class="size-4" />
+                                            <span class="whitespace-nowrap">{move || t("welcome.sign_in")}</span>
+                                        </button>
+                                    </div>
                                 }.into_view()
                             },
                         }}
                     </div>
                 </aside>
 
-                <SidebarDivider collapsed=sidebar_collapsed on_toggle=Callback::new(toggle_sidebar) />
+                <SidebarDivider collapsed=sidebar_collapsed on_toggle=sidebar_toggle />
 
                 // Right content area — the section content comes in a later phase.
                 <main class="flex-1 min-w-0 overflow-y-auto px-8 py-8">
@@ -358,10 +408,11 @@ fn NavItem(
 ) -> impl IntoView {
     // Sidebar item: full-width, left-aligned row with icon + label.
     let class = if active {
-        "w-full flex items-center gap-2.5 h-10 pl-[18px] pr-3 overflow-hidden text-sm font-medium rounded-lg bg-primary-soft text-primary"
+        "w-full flex items-center gap-2.5 h-10 pl-[24px] pr-3 overflow-hidden text-sm font-medium rounded-lg bg-primary-soft text-primary hover:bg-primary-soft/80"
     } else {
-        "w-full flex items-center gap-2.5 h-10 pl-[18px] pr-3 overflow-hidden text-sm font-medium rounded-lg text-muted hover:bg-bg hover:text-content transition-colors"
+        "w-full flex items-center gap-2.5 h-10 pl-[24px] pr-3 overflow-hidden text-sm font-medium rounded-lg text-muted hover:bg-bg hover:text-content transition-colors"
     };
+    let wrapper_class = "pr-[7px]";
     let label_class = move || {
         if collapsed.get() {
             "min-w-0 max-w-0 opacity-0 overflow-hidden whitespace-nowrap transition-[max-width,opacity] duration-150"
@@ -370,10 +421,12 @@ fn NavItem(
         }
     };
     view! {
-        <button type="button" title=move || label.get() class=class>
-            <Icon name=icon class="size-4" />
-            <span class=label_class>{move || label.get()}</span>
-        </button>
+        <div class=wrapper_class>
+            <button type="button" title=move || label.get() class=class>
+                <Icon name=icon class="size-4" />
+                <span class=label_class>{move || label.get()}</span>
+            </button>
+        </div>
     }
 }
 
@@ -407,6 +460,11 @@ fn SidebarDivider(#[prop(into)] collapsed: Signal<bool>, on_toggle: Callback<()>
         }
     };
 
+    let handle_click = move |_| {
+        hovering.set(false);
+        on_toggle.call(());
+    };
+
     view! {
         <div
             class="relative z-20 shrink-0 self-stretch w-px overflow-visible"
@@ -424,7 +482,7 @@ fn SidebarDivider(#[prop(into)] collapsed: Signal<bool>, on_toggle: Callback<()>
                 aria-label=move || if collapsed.get() { t("sidebar.expand") } else { t("sidebar.collapse") }
                 class=button_class
                 on:mouseenter=move |_| hovering.set(true)
-                on:click=move |_| on_toggle.call(())
+                on:click=handle_click
             >
                 <SidebarToggleIcon collapsed=collapsed />
             </button>

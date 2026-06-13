@@ -12,6 +12,8 @@ pub enum IconName {
     Close,
     Folder,
     Github,
+    GithubDark,
+    GithubLight,
     Globe,
     Key,
     Monitor,
@@ -31,6 +33,8 @@ impl IconName {
             IconName::Close => "assets/images/svg/icons/close.svg",
             IconName::Folder => "assets/images/svg/icons/folder.svg",
             IconName::Github => "assets/images/svg/icons/github.svg",
+            IconName::GithubDark => "assets/images/svg/icons/github-dark.svg",
+            IconName::GithubLight => "assets/images/svg/icons/github-light.svg",
             IconName::Globe => "assets/images/svg/icons/globe.svg",
             IconName::Key => "assets/images/svg/icons/key.svg",
             IconName::Monitor => "assets/images/svg/icons/monitor.svg",
@@ -59,5 +63,20 @@ pub fn Icon(name: IconName, #[prop(into, optional)] class: String) -> impl IntoV
 
     view! {
         <span class=combined_class style=style aria-hidden="true"></span>
+    }
+}
+
+/// Direct SVG icon - renders the SVG file as an <img> without mask
+#[component]
+pub fn IconSvg(#[prop(into)] name: Signal<IconName>, #[prop(into, optional)] class: String) -> impl IntoView {
+    let base_class = "shrink-0 inline-block";
+    let combined_class = if class.is_empty() {
+        base_class.to_string()
+    } else {
+        format!("{} {}", base_class, class)
+    };
+
+    view! {
+        <img src=move || name.get().src() class=combined_class aria-hidden="true" />
     }
 }
