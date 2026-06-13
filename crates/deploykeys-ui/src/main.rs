@@ -1,6 +1,7 @@
 mod api;
 mod app;
 mod i18n;
+mod icons;
 mod screens;
 mod tauri;
 mod theme;

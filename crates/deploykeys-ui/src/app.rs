@@ -3,6 +3,7 @@
 
 use crate::api;
 use crate::i18n::{self, t, Locale};
+use crate::icons::{Icon, IconName};
 use crate::screens::oauth::OAuth;
 use crate::theme::{self, Theme};
 use leptos::*;
@@ -160,7 +161,7 @@ fn poll_loop(
     });
 }
 
-/// The main app screen (repos / targets / keys / forge), with a top nav. The
+/// The main app screen (repos / connect / keys / forge), with a top nav. The
 /// top-right corner shows the signed-in identity + sign out when authenticated,
 /// or a "sign in with GitHub" button that starts the device flow otherwise.
 #[component]
@@ -238,10 +239,10 @@ fn Main(
                 // (sign in / signed-in identity + sign out) pinned to the bottom.
                 <aside class="shrink-0 w-60 bg-surface border-r border-border flex flex-col overflow-y-auto">
                     <nav class="flex flex-col gap-1 py-3 px-2">
-                        <NavItem label=move || t("nav.repos") active=true />
-                        <NavItem label=move || t("nav.targets") active=false />
-                        <NavItem label=move || t("nav.keys") active=false />
-                        <NavItem label=move || t("nav.forge") active=false />
+                        <NavItem icon=IconName::Folder label=move || t("nav.repos") active=true />
+                        <NavItem icon=IconName::Server label=move || t("nav.connect") active=false />
+                        <NavItem icon=IconName::Key label=move || t("nav.keys") active=false />
+                        <NavItem icon=IconName::Key label=move || t("nav.forge") active=false />
                     </nav>
 
                     // Spacer pushes the account block to the bottom.
@@ -305,14 +306,23 @@ fn Main(
 }
 
 #[component]
-fn NavItem(#[prop(into)] label: Signal<&'static str>, active: bool) -> impl IntoView {
-    // Sidebar item: full-width, left-aligned row (admin-panel style).
+fn NavItem(
+    icon: IconName,
+    #[prop(into)] label: Signal<&'static str>,
+    active: bool,
+) -> impl IntoView {
+    // Sidebar item: full-width, left-aligned row with icon + label.
     let class = if active {
-        "w-full flex items-center py-2 px-3 text-sm font-medium rounded-lg bg-primary-soft text-primary"
+        "w-full flex items-center gap-2.5 py-2 px-3 text-sm font-medium rounded-lg bg-primary-soft text-primary"
     } else {
-        "w-full flex items-center py-2 px-3 text-sm font-medium rounded-lg text-muted hover:bg-bg hover:text-content transition-colors"
+        "w-full flex items-center gap-2.5 py-2 px-3 text-sm font-medium rounded-lg text-muted hover:bg-bg hover:text-content transition-colors"
     };
-    view! { <button type="button" class=class>{move || label.get()}</button> }
+    view! {
+        <button type="button" class=class>
+            <Icon name=icon class="size-4" />
+            <span>{move || label.get()}</span>
+        </button>
+    }
 }
 
 /// Header command-palette trigger. Minimal velox-style: just the hint text and
@@ -346,7 +356,7 @@ fn CommandPaletteTrigger(on_open: Callback<()>) -> impl IntoView {
 
 /// Command palette modal: full-screen dialog with search + keyboard navigation.
 /// Velox-style: clean UI, arrow key navigation, history persistence, footer hints.
-/// Commands: nav items (repos/targets/keys/forge), toggle theme/language. Real
+/// Commands: nav items (repos/connect/keys/forge), toggle theme/language. Real
 /// actions (create key, bind target) land once those screens exist.
 #[component]
 fn CommandPalette(open: RwSignal<bool>) -> impl IntoView {
@@ -401,17 +411,18 @@ fn CommandPalette(open: RwSignal<bool>) -> impl IntoView {
         }
     };
 
-    // Command definitions: (i18n key, action). No hardcoded icons — actions
-    // carry intent, the UI shows text labels.
-    let all_commands = move || -> Vec<(&'static str, Box<dyn Fn()>)> {
+    // Command definitions: (i18n key, icon, action). Icons use the centralized
+    // IconName enum from icons.rs — adding a new command means picking an
+    // existing icon or extending the enum with a new SVG.
+    let all_commands = move || -> Vec<(&'static str, IconName, Box<dyn Fn()>)> {
         let locale = i18n::locale();
         let theme_signal = theme::theme();
         vec![
-            ("nav.repos", Box::new(|| {}) as Box<dyn Fn()>),
-            ("nav.targets", Box::new(|| {})),
-            ("nav.keys", Box::new(|| {})),
-            ("nav.forge", Box::new(|| {})),
-            ("palette.toggle_theme", Box::new(move || {
+            ("nav.repos", IconName::Folder, Box::new(|| {}) as Box<dyn Fn()>),
+            ("nav.connect", IconName::Server, Box::new(|| {})),
+            ("nav.keys", IconName::Key, Box::new(|| {})),
+            ("nav.forge", IconName::Key, Box::new(|| {})),
+            ("palette.toggle_theme", IconName::Moon, Box::new(move || {
                 let next = match theme_signal.get_untracked() {
                     Theme::System => Theme::Light,
                     Theme::Light => Theme::Dark,
@@ -420,7 +431,7 @@ fn CommandPalette(open: RwSignal<bool>) -> impl IntoView {
                 theme_signal.set(next);
                 open.set(false);
             })),
-            ("palette.change_language", Box::new(move || {
+            ("palette.change_language", IconName::Globe, Box::new(move || {
                 let next = match locale.get_untracked() {
                     Locale::En => Locale::Zh,
                     Locale::Zh => Locale::En,
@@ -434,22 +445,21 @@ fn CommandPalette(open: RwSignal<bool>) -> impl IntoView {
     };
 
     // Filtered commands: if query empty, show history; else substring match.
-    let filtered = move || -> Vec<(String, Box<dyn Fn()>)> {
+    let filtered = move || -> Vec<(String, Option<IconName>, Box<dyn Fn()>)> {
         let q = query.get().trim().to_lowercase();
         if q.is_empty() {
-            // Show history (with dummy actions — clicking a history item re-runs
-            // the search, which then matches the real command).
+            // Show history (no icon, action re-runs search).
             history.get().into_iter().take(10).map(|key| {
                 let k = key.clone();
-                (key, Box::new(move || {
+                (key, None, Box::new(move || {
                     query.set(k.clone());
                 }) as Box<dyn Fn()>)
             }).collect()
         } else {
             all_commands()
                 .into_iter()
-                .filter(|(key, _)| t(key).to_lowercase().contains(&q))
-                .map(|(key, action)| (t(key).to_string(), action))
+                .filter(|(key, _, _)| t(key).to_lowercase().contains(&q))
+                .map(|(key, icon, action)| (t(key).to_string(), Some(icon), action))
                 .collect()
         }
     };
@@ -490,7 +500,7 @@ fn CommandPalette(open: RwSignal<bool>) -> impl IntoView {
             let items = filtered();
             let idx = selected.get_untracked();
             if idx < items.len() {
-                let (label, action) = &items[idx];
+                let (label, _icon, action) = &items[idx];
                 save_history(label);
                 action();
             }
@@ -542,12 +552,12 @@ fn CommandPalette(open: RwSignal<bool>) -> impl IntoView {
                                 }.into_view()
                             } else {
                                 let is_history = q.is_empty();
-                                items.into_iter().enumerate().map(|(idx, (label, action))| {
+                                items.into_iter().enumerate().map(|(idx, (label, icon_opt, action))| {
                                     let active = move || selected.get() == idx;
                                     let label_clone = label.clone();
                                     view! {
                                         <div
-                                            class="flex items-center gap-2 py-2.5 px-3 rounded-lg text-sm cursor-pointer transition-colors"
+                                            class="flex items-center gap-3 py-2.5 px-3 rounded-lg text-sm cursor-pointer transition-colors"
                                             class:bg-primary=active
                                             class:text-on-primary=active
                                             class:text-content=move || !active()
@@ -558,6 +568,10 @@ fn CommandPalette(open: RwSignal<bool>) -> impl IntoView {
                                             }
                                             on:mouseenter=move |_| selected.set(idx)
                                         >
+                                            {move || match icon_opt {
+                                                Some(icon) => view! { <Icon name=icon class="size-5" /> }.into_view(),
+                                                None => view! { <div class="shrink-0 size-5"></div> }.into_view(),
+                                            }}
                                             <span class="flex-1">{label.clone()}</span>
                                             <Show when=move || is_history && active()>
                                                 <button
@@ -568,10 +582,7 @@ fn CommandPalette(open: RwSignal<bool>) -> impl IntoView {
                                                         delete_history(idx);
                                                     }
                                                 >
-                                                    <svg class="size-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" xmlns="http://www.w3.org/2000/svg">
-                                                        <path d="M18 6 6 18"></path>
-                                                        <path d="m6 6 12 12"></path>
-                                                    </svg>
+                                                    <Icon name=IconName::Close class="size-3" />
                                                 </button>
                                             </Show>
                                         </div>
@@ -650,11 +661,7 @@ fn LanguageToggle() -> impl IntoView {
                 title=move || t("settings.language")
                 on_click=Callback::new(move |_| open.update(|o| *o = !*o))
             >
-                <svg class="shrink-0 size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" xmlns="http://www.w3.org/2000/svg">
-                    <circle cx="12" cy="12" r="10"></circle>
-                    <path d="M2 12h20"></path>
-                    <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"></path>
-                </svg>
+                <Icon name=IconName::Globe class="size-4" />
             </IconButton>
 
             <Show when=move || open.get()>
@@ -705,30 +712,9 @@ fn ThemeToggle() -> impl IntoView {
     view! {
         <IconButton title=move || t("settings.theme") on_click=Callback::new(toggle)>
             {move || match theme.get() {
-                // Sun (light)
-                Theme::Light => view! {
-                    <svg class="shrink-0 size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" xmlns="http://www.w3.org/2000/svg">
-                        <circle cx="12" cy="12" r="4"></circle>
-                        <path d="M12 2v2"></path><path d="M12 20v2"></path>
-                        <path d="m4.93 4.93 1.41 1.41"></path><path d="m17.66 17.66 1.41 1.41"></path>
-                        <path d="M2 12h2"></path><path d="M20 12h2"></path>
-                        <path d="m6.34 17.66-1.41 1.41"></path><path d="m19.07 4.93-1.41 1.41"></path>
-                    </svg>
-                }.into_view(),
-                // Moon (dark)
-                Theme::Dark => view! {
-                    <svg class="shrink-0 size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" xmlns="http://www.w3.org/2000/svg">
-                        <path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"></path>
-                    </svg>
-                }.into_view(),
-                // Monitor (system / auto)
-                Theme::System => view! {
-                    <svg class="shrink-0 size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" xmlns="http://www.w3.org/2000/svg">
-                        <rect width="20" height="14" x="2" y="3" rx="2"></rect>
-                        <line x1="8" x2="16" y1="21" y2="21"></line>
-                        <line x1="12" x2="12" y1="17" y2="21"></line>
-                    </svg>
-                }.into_view(),
+                Theme::Light => view! { <Icon name=IconName::Sun class="size-4" /> }.into_view(),
+                Theme::Dark => view! { <Icon name=IconName::Moon class="size-4" /> }.into_view(),
+                Theme::System => view! { <Icon name=IconName::Monitor class="size-4" /> }.into_view(),
             }}
         </IconButton>
     }
