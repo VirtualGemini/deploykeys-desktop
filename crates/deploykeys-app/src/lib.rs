@@ -10,8 +10,6 @@ use deploykeys_core::github::{DeviceFlowClient, PollResult};
 use deploykeys_core::services::AuthService;
 use serde::Serialize;
 use tauri::{Manager, State};
-#[cfg(target_os = "macos")]
-use tauri_plugin_decorum::WebviewWindowExt;
 
 /// GitHub App client ID for the device flow (public information).
 /// Override with the `DEPLOYKEYS_GITHUB_CLIENT_ID` environment variable.
@@ -154,31 +152,6 @@ async fn open_url(url: String) -> Result<(), String> {
 
 // ---- App setup ------------------------------------------------------------
 
-/// Center the macOS traffic-light buttons in our custom header.
-///
-/// decorum's `set_traffic_lights_inset(x, y)` does not place buttons "y pixels
-/// from the top": per its `traffic.rs` the button center ends up at
-/// `y/2 + 4 + BUTTON_HEIGHT/2` (AppKit logical points — same unit as our CSS
-/// px, independent of display scale). To center the lights in the header
-/// (mid-line = HEADER_HEIGHT/2), solve for y:
-///     HEADER_HEIGHT/2 = y/2 + 4 + BUTTON_HEIGHT/2
-///     y = HEADER_HEIGHT - 8 - BUTTON_HEIGHT
-/// then nudge the center up 1px (subtract 2 from y, since y is halved).
-///
-/// This must be re-applied on focus/resize: macOS resets the buttons to the
-/// system inset whenever the window regains key or is resized, so a one-shot
-/// call at startup gets overwritten. Keep `HEADER_HEIGHT` in sync with the UI
-/// header; the lights re-center themselves when it changes.
-#[cfg(target_os = "macos")]
-fn center_traffic_lights(window: &tauri::WebviewWindow) {
-    /// UI header height in logical px (matches the `h-14` header).
-    const HEADER_HEIGHT: f32 = 56.0;
-    /// macOS traffic-light button height (logical points).
-    const BUTTON_HEIGHT: f32 = 12.0;
-    let inset_y = HEADER_HEIGHT - 8.0 - BUTTON_HEIGHT - 2.0;
-    let _ = window.set_traffic_lights_inset(16.0, inset_y);
-}
-
 /// Entry point shared by the binary. Opens the database, registers state and
 /// commands, and runs the Tauri event loop.
 pub fn run() {
@@ -189,38 +162,12 @@ pub fn run() {
         )
         .init();
 
-    // Note: we deliberately do NOT register `tauri_plugin_decorum::init()`. Its
-    // `on_window_ready` installs a persistent traffic-light positioner hardcoded
-    // to the plugin's default inset (PAD_Y = 16), which runs after `setup` and
-    // overrides our custom inset — and re-pins to 16 on every resize. We only
-    // want decorum's `set_traffic_lights_inset` trait method, which works
-    // standalone, so we position the lights ourselves and re-apply on the window
-    // events that would otherwise reset them.
     tauri::Builder::default()
         .setup(|app| {
             // Open the database on the Tauri async runtime before the first
             // command can run, then stash it in managed state.
             let db = tauri::async_runtime::block_on(init_database())?;
             app.manage(AppState { db });
-
-            #[cfg(target_os = "macos")]
-            {
-                let window = app.get_webview_window("main").unwrap();
-                center_traffic_lights(&window);
-
-                // macOS resets the traffic-light position when the window gains
-                // focus or resizes, so re-apply our inset on those events to keep
-                // them centered in the header.
-                let win = window.clone();
-                window.on_window_event(move |event| {
-                    if matches!(
-                        event,
-                        tauri::WindowEvent::Focused(true) | tauri::WindowEvent::Resized(_)
-                    ) {
-                        center_traffic_lights(&win);
-                    }
-                });
-            }
 
             Ok(())
         })
