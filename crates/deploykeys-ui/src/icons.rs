@@ -18,6 +18,8 @@ pub enum IconName {
     Moon,
     Server,
     SignOut,
+    SidebarToggle,
+    SidebarToggleFilled,
     Sun,
 }
 
@@ -35,6 +37,8 @@ impl IconName {
             IconName::Moon => "assets/images/svg/icons/moon.svg",
             IconName::Server => "assets/images/svg/icons/server.svg",
             IconName::SignOut => "assets/images/svg/icons/sign-out.svg",
+            IconName::SidebarToggle => "assets/images/svg/icons/sidebar-toggle.svg",
+            IconName::SidebarToggleFilled => "assets/images/svg/icons/sidebar-toggle-filled.svg",
             IconName::Sun => "assets/images/svg/icons/sun.svg",
         }
     }

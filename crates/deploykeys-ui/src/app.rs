@@ -25,6 +25,8 @@ struct AuthSession {
     interval_secs: u64,
 }
 
+const SIDEBAR_AUTO_COLLAPSE_WIDTH: f64 = 840.0;
+
 #[component]
 pub fn App() -> impl IntoView {
     // Provide the reactive locale and theme at the root. `provide_context` must
@@ -180,6 +182,26 @@ fn Main(
     // header trigger). When open, a full-screen modal overlay with a centered
     // search box + filtered action list appears.
     let palette_open = RwSignal::new(false);
+    let manual_sidebar_collapsed = RwSignal::new(None::<bool>);
+    let auto_sidebar_collapsed = RwSignal::new(should_auto_collapse_sidebar());
+    let sidebar_collapsed = Signal::derive(move || {
+        manual_sidebar_collapsed
+            .get()
+            .unwrap_or_else(|| auto_sidebar_collapsed.get())
+    });
+
+    let resize_handle = window_event_listener(ev::resize, move |_| {
+        let next_auto_collapsed = should_auto_collapse_sidebar();
+        if next_auto_collapsed != auto_sidebar_collapsed.get_untracked() {
+            manual_sidebar_collapsed.set(None);
+        }
+        auto_sidebar_collapsed.set(next_auto_collapsed);
+    });
+    on_cleanup(move || resize_handle.remove());
+
+    let toggle_sidebar = move |_| {
+        manual_sidebar_collapsed.set(Some(!sidebar_collapsed.get_untracked()));
+    };
 
     view! {
         // Standard web-admin layout: a top title bar, then a body row split into
@@ -232,50 +254,83 @@ fn Main(
             <div class="flex-1 flex min-h-0">
                 // Left sidebar: vertical section nav at the top, account controls
                 // (sign in / signed-in identity + sign out) pinned to the bottom.
-                <aside class="shrink-0 w-60 bg-surface border-r border-border flex flex-col overflow-y-auto">
-                    <nav class="flex flex-col gap-1 py-3 px-2">
-                        <NavItem icon=IconName::Folder label=move || t("nav.repos") active=true />
-                        <NavItem icon=IconName::Server label=move || t("nav.connect") active=false />
-                        <NavItem icon=IconName::Key label=move || t("nav.keys") active=false />
-                        <NavItem icon=IconName::Key label=move || t("nav.forge") active=false />
+                <aside class=move || {
+                    if sidebar_collapsed.get() {
+                        "shrink-0 w-[68px] bg-surface flex flex-col overflow-y-auto overflow-x-hidden transition-[width] duration-300 [transition-timing-function:cubic-bezier(0.22,1,0.36,1)]"
+                    } else {
+                        "shrink-0 w-[230px] bg-surface flex flex-col overflow-y-auto overflow-x-hidden transition-[width] duration-300 [transition-timing-function:cubic-bezier(0.22,1,0.36,1)]"
+                    }
+                }>
+                    <nav class="flex flex-col gap-1 py-3 pl-2 pr-1">
+                        <NavItem icon=IconName::Folder label=move || t("nav.repos") active=true collapsed=sidebar_collapsed />
+                        <NavItem icon=IconName::Server label=move || t("nav.connect") active=false collapsed=sidebar_collapsed />
+                        <NavItem icon=IconName::Key label=move || t("nav.keys") active=false collapsed=sidebar_collapsed />
+                        <NavItem icon=IconName::Key label=move || t("nav.forge") active=false collapsed=sidebar_collapsed />
                     </nav>
 
                     // Spacer pushes the account block to the bottom.
                     <div class="flex-1"></div>
 
                     // Account block: bottom of the sidebar, above a divider.
-                    <div class="shrink-0 p-3 border-t border-border">
+                    <div class="shrink-0 py-3 pl-3 pr-1 border-t border-border">
                         {move || match account.get() {
-                            Some(acct) => view! {
-                                <div class="flex items-center gap-2">
-                                    <div class="flex items-center justify-center size-8 shrink-0 rounded-full bg-primary-soft text-primary text-sm font-semibold uppercase">
-                                        {acct.login.chars().next().unwrap_or('?').to_string()}
+                            Some(acct) => {
+                                let login = format!("@{}", acct.login);
+                                let identity_class = move || {
+                                    if sidebar_collapsed.get() {
+                                        "flex-1 min-w-0 max-w-0 opacity-0 overflow-hidden whitespace-nowrap text-sm text-content transition-[max-width,opacity] duration-150"
+                                    } else {
+                                        "flex-1 min-w-0 max-w-[10rem] opacity-100 truncate text-sm text-content transition-[max-width,opacity] duration-200"
+                                    }
+                                };
+                                let sign_out_class = move || {
+                                    if sidebar_collapsed.get() {
+                                        "ml-auto shrink-0 flex justify-center items-center size-8 rounded-lg text-muted opacity-0 pointer-events-none transition-opacity duration-150"
+                                    } else {
+                                        "ml-auto shrink-0 flex justify-center items-center size-8 rounded-lg text-muted opacity-100 hover:bg-bg hover:text-content focus:outline-none transition-opacity duration-200"
+                                    }
+                                };
+                                view! {
+                                    <div class="w-full min-w-0 flex items-center gap-2 pl-[6px]">
+                                        <AccountAvatar account=acct.clone() />
+                                        <span class=identity_class>{login}</span>
+                                        <button
+                                            type="button"
+                                            title=move || t("common.sign_out")
+                                            class=sign_out_class
+                                            on:click=sign_out
+                                        >
+                                            <Icon name=IconName::SignOut class="size-4" />
+                                        </button>
                                     </div>
-                                    <span class="flex-1 min-w-0 truncate text-sm text-content">{format!("@{}", acct.login)}</span>
+                                }.into_view()
+                            },
+                            None => {
+                                let label_class = move || {
+                                    if sidebar_collapsed.get() {
+                                        "max-w-0 opacity-0 overflow-hidden whitespace-nowrap transition-[max-width,opacity] duration-150"
+                                    } else {
+                                        "max-w-[10rem] opacity-100 whitespace-nowrap transition-[max-width,opacity] duration-200"
+                                    }
+                                };
+                                view! {
                                     <button
                                         type="button"
-                                        title=move || t("common.sign_out")
-                                        class="shrink-0 flex justify-center items-center size-8 rounded-lg text-muted hover:bg-bg hover:text-content focus:outline-none transition-colors"
-                                        on:click=sign_out
+                                        title=move || if signing_in.get() { t("welcome.signing_in") } else { t("welcome.sign_in") }
+                                        class="w-full inline-flex justify-start items-center gap-x-2 h-10 pl-[14px] pr-4 overflow-hidden text-sm font-medium rounded-lg bg-primary text-on-primary hover:bg-primary-hover focus:outline-none disabled:opacity-50 disabled:pointer-events-none transition-colors duration-300"
+                                        prop:disabled=signing_in
+                                        on:click=move |_| on_sign_in.call(())
                                     >
-                                        <Icon name=IconName::SignOut class="size-4" />
+                                        <Icon name=IconName::Github class="size-4" />
+                                        <span class=label_class>{move || if signing_in.get() { t("welcome.signing_in") } else { t("welcome.sign_in") }}</span>
                                     </button>
-                                </div>
-                            }.into_view(),
-                            None => view! {
-                                <button
-                                    type="button"
-                                    class="w-full inline-flex justify-center items-center gap-x-2 py-2 px-4 text-sm font-medium rounded-lg bg-primary text-on-primary hover:bg-primary-hover focus:outline-none disabled:opacity-50 disabled:pointer-events-none transition-colors"
-                                    prop:disabled=signing_in
-                                    on:click=move |_| on_sign_in.call(())
-                                >
-                                    <Icon name=IconName::Github class="size-4" />
-                                    {move || if signing_in.get() { t("welcome.signing_in") } else { t("welcome.sign_in") }}
-                                </button>
-                            }.into_view(),
+                                }.into_view()
+                            },
                         }}
                     </div>
                 </aside>
+
+                <SidebarDivider collapsed=sidebar_collapsed on_toggle=Callback::new(toggle_sidebar) />
 
                 // Right content area — the section content comes in a later phase.
                 <main class="flex-1 min-w-0 overflow-y-auto px-8 py-8">
@@ -299,18 +354,95 @@ fn NavItem(
     icon: IconName,
     #[prop(into)] label: Signal<&'static str>,
     active: bool,
+    #[prop(into)] collapsed: Signal<bool>,
 ) -> impl IntoView {
     // Sidebar item: full-width, left-aligned row with icon + label.
     let class = if active {
-        "w-full flex items-center gap-2.5 py-2 px-3 text-sm font-medium rounded-lg bg-primary-soft text-primary"
+        "w-full flex items-center gap-2.5 h-10 pl-[18px] pr-3 overflow-hidden text-sm font-medium rounded-lg bg-primary-soft text-primary"
     } else {
-        "w-full flex items-center gap-2.5 py-2 px-3 text-sm font-medium rounded-lg text-muted hover:bg-bg hover:text-content transition-colors"
+        "w-full flex items-center gap-2.5 h-10 pl-[18px] pr-3 overflow-hidden text-sm font-medium rounded-lg text-muted hover:bg-bg hover:text-content transition-colors"
+    };
+    let label_class = move || {
+        if collapsed.get() {
+            "min-w-0 max-w-0 opacity-0 overflow-hidden whitespace-nowrap transition-[max-width,opacity] duration-150"
+        } else {
+            "min-w-0 max-w-[9rem] opacity-100 truncate transition-[max-width,opacity] duration-200"
+        }
     };
     view! {
-        <button type="button" class=class>
+        <button type="button" title=move || label.get() class=class>
             <Icon name=icon class="size-4" />
-            <span>{move || label.get()}</span>
+            <span class=label_class>{move || label.get()}</span>
         </button>
+    }
+}
+
+#[component]
+fn AccountAvatar(account: api::Account) -> impl IntoView {
+    let title = format!("@{}", account.login);
+    match account.avatar_url {
+        Some(url) => view! {
+            <img src=url alt="" title=title class="size-8 shrink-0 rounded-full bg-primary-soft" />
+        }
+        .into_view(),
+        None => {
+            let initial = account.login.chars().next().unwrap_or('?').to_string();
+            view! {
+                <div title=title class="flex items-center justify-center size-8 shrink-0 rounded-full bg-primary-soft text-primary text-sm font-semibold uppercase">
+                    {initial}
+                </div>
+            }.into_view()
+        }
+    }
+}
+
+#[component]
+fn SidebarDivider(#[prop(into)] collapsed: Signal<bool>, on_toggle: Callback<()>) -> impl IntoView {
+    let hovering = RwSignal::new(false);
+    let button_class = move || {
+        if hovering.get() {
+            "absolute top-8 left-[-13px] z-30 flex items-center justify-center size-8 text-content opacity-100 hover:text-primary focus:opacity-100 focus:outline-none transition-opacity duration-150"
+        } else {
+            "absolute top-8 left-[-13px] z-30 flex items-center justify-center size-8 text-muted opacity-0 hover:text-primary hover:opacity-100 focus:opacity-100 focus:outline-none transition-opacity duration-150"
+        }
+    };
+
+    view! {
+        <div
+            class="relative z-20 shrink-0 self-stretch w-px overflow-visible"
+            on:mouseenter=move |_| hovering.set(true)
+            on:mouseleave=move |_| hovering.set(false)
+        >
+            <div
+                class="absolute inset-y-0 left-[-3px] z-20 w-[7px] cursor-pointer bg-transparent"
+                on:mouseenter=move |_| hovering.set(true)
+            ></div>
+            <div class="absolute inset-y-0 left-0 w-px bg-border pointer-events-none"></div>
+            <button
+                type="button"
+                title=move || if collapsed.get() { t("sidebar.expand") } else { t("sidebar.collapse") }
+                aria-label=move || if collapsed.get() { t("sidebar.expand") } else { t("sidebar.collapse") }
+                class=button_class
+                on:mouseenter=move |_| hovering.set(true)
+                on:click=move |_| on_toggle.call(())
+            >
+                <SidebarToggleIcon collapsed=collapsed />
+            </button>
+        </div>
+    }
+}
+
+#[component]
+fn SidebarToggleIcon(#[prop(into)] collapsed: Signal<bool>) -> impl IntoView {
+    view! {
+        {move || {
+            let icon = if collapsed.get() {
+                IconName::SidebarToggleFilled
+            } else {
+                IconName::SidebarToggle
+            };
+            view! { <Icon name=icon class="size-6" /> }
+        }}
     }
 }
 
@@ -730,6 +862,14 @@ fn ThemeToggle() -> impl IntoView {
             }}
         </IconButton>
     }
+}
+
+fn should_auto_collapse_sidebar() -> bool {
+    web_sys::window()
+        .and_then(|w| w.inner_width().ok())
+        .and_then(|width| width.as_f64())
+        .map(|width| width <= SIDEBAR_AUTO_COLLAPSE_WIDTH)
+        .unwrap_or(false)
 }
 
 /// Read the webview's language (e.g. `zh-CN`) and map it to a supported locale.
