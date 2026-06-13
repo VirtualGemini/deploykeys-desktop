@@ -175,10 +175,10 @@ fn Main(
         account.set(None);
     };
 
-    // Shared search query. Bound to the header search box; today it filters the
-    // sidebar nav, and is the hook the repos/targets/keys screens will read once
-    // they land.
-    let query = RwSignal::new(String::new());
+    // Command palette open state (toggled by ⌘K / Ctrl+K, or clicking the
+    // header trigger). When open, a full-screen modal overlay with a centered
+    // search box + filtered action list appears.
+    let palette_open = RwSignal::new(false);
 
     view! {
         // Standard web-admin layout: a top title bar, then a body row split into
@@ -224,10 +224,13 @@ fn Main(
                 // Right: search box + language toggle + theme toggle. Sizing and
                 // shape follow Preline's search-trigger and icon-button specs; the
                 // interactions are wired to our own i18n/theme signals.
-                <SearchBox query=query />
+                <CommandPaletteTrigger on_open=Callback::new(move |_| palette_open.set(true)) />
                 <LanguageToggle />
                 <ThemeToggle />
             </header>
+
+            // Command palette modal (shown when palette_open is true).
+            <CommandPalette open=palette_open />
 
             // Body: sidebar (left) + content (right).
             <div class="flex-1 flex min-h-0">
@@ -235,27 +238,10 @@ fn Main(
                 // (sign in / signed-in identity + sign out) pinned to the bottom.
                 <aside class="shrink-0 w-60 bg-surface border-r border-border flex flex-col overflow-y-auto">
                     <nav class="flex flex-col gap-1 py-3 px-2">
-                        {move || {
-                            // Data-driven nav: (translation key, active). The
-                            // shared search query filters it live by matching the
-                            // translated label (case-insensitive). The same query
-                            // will filter repos/targets/keys once those land.
-                            let q = query.get().trim().to_lowercase();
-                            [
-                                ("nav.repos", true),
-                                ("nav.targets", false),
-                                ("nav.keys", false),
-                                ("nav.forge", false),
-                            ]
-                            .into_iter()
-                            .filter(|(key, _)| {
-                                q.is_empty() || t(key).to_lowercase().contains(&q)
-                            })
-                            .map(|(key, active)| {
-                                view! { <NavItem label=move || t(key) active=active /> }
-                            })
-                            .collect_view()
-                        }}
+                        <NavItem label=move || t("nav.repos") active=true />
+                        <NavItem label=move || t("nav.targets") active=false />
+                        <NavItem label=move || t("nav.keys") active=false />
+                        <NavItem label=move || t("nav.forge") active=false />
                     </nav>
 
                     // Spacer pushes the account block to the bottom.
@@ -329,65 +315,291 @@ fn NavItem(#[prop(into)] label: Signal<&'static str>, active: bool) -> impl Into
     view! { <button type="button" class=class>{move || label.get()}</button> }
 }
 
-/// Header search field. A real controlled input bound to the shared `query`
-/// signal (so the rest of the UI can react to it — today it filters the sidebar
-/// nav, later it will filter repos/targets/keys). Styled after Preline's search
-/// input: rounded, bordered, leading magnifier, with a trailing ⌘K badge that
-/// becomes a clear button once there is text. Cmd/Ctrl+K focuses it from
-/// anywhere.
+/// Header command-palette trigger. Minimal velox-style: just the hint text and
+/// shortcut badge, no leading icon bloat. Clicking it or Cmd/Ctrl+K opens the
+/// palette modal.
 #[component]
-fn SearchBox(query: RwSignal<String>) -> impl IntoView {
-    let input_ref = NodeRef::<html::Input>::new();
-
-    // Cmd/Ctrl+K focuses the search input from anywhere in the window.
+fn CommandPaletteTrigger(on_open: Callback<()>) -> impl IntoView {
+    // Global Cmd/Ctrl+K handler. Fires even when the trigger is hidden (mobile).
     let handle = window_event_listener(ev::keydown, move |ev| {
         if (ev.meta_key() || ev.ctrl_key()) && ev.key().eq_ignore_ascii_case("k") {
             ev.prevent_default();
-            if let Some(input) = input_ref.get() {
-                let _ = input.focus();
+            on_open.call(());
+        }
+    });
+    on_cleanup(move || handle.remove());
+
+    view! {
+        <button
+            type="button"
+            class="hidden sm:inline-flex items-center justify-between gap-x-3 w-56 h-9 px-2.5 text-sm rounded-lg bg-bg border border-border text-muted hover:bg-surface focus:outline-none transition-colors"
+            on:click=move |_| on_open.call(())
+        >
+            <span class="text-xs">{move || t("palette.trigger")}</span>
+            <span class="flex items-center gap-x-0.5 h-5 px-1.5 border border-border rounded text-xs text-muted">
+                <span>"⌘"</span>
+                <span class="uppercase">"K"</span>
+            </span>
+        </button>
+    }
+}
+
+/// Command palette modal: full-screen dialog with search + keyboard navigation.
+/// Velox-style: clean UI, arrow key navigation, history persistence, footer hints.
+/// Commands: nav items (repos/targets/keys/forge), toggle theme/language. Real
+/// actions (create key, bind target) land once those screens exist.
+#[component]
+fn CommandPalette(open: RwSignal<bool>) -> impl IntoView {
+    let query = RwSignal::new(String::new());
+    let input_ref = NodeRef::<html::Input>::new();
+    let selected = RwSignal::new(0_usize); // Keyboard-selected index
+
+    // Search history: persisted to localStorage, max 10 items.
+    let history = create_rw_signal({
+        if let Some(win) = web_sys::window() {
+            if let Ok(Some(storage)) = win.local_storage() {
+                if let Ok(Some(json)) = storage.get_item("command_palette_history") {
+                    serde_json::from_str::<Vec<String>>(&json).unwrap_or_default()
+                } else {
+                    vec![]
+                }
+            } else {
+                vec![]
+            }
+        } else {
+            vec![]
+        }
+    });
+
+    let save_history = move |key: &str| {
+        let mut h = history.get_untracked();
+        h.retain(|k| k != key);
+        h.insert(0, key.to_string());
+        h.truncate(10);
+        history.set(h.clone());
+        if let Some(win) = web_sys::window() {
+            if let Ok(Some(storage)) = win.local_storage() {
+                if let Ok(json) = serde_json::to_string(&h) {
+                    let _ = storage.set_item("command_palette_history", &json);
+                }
+            }
+        }
+    };
+
+    let delete_history = move |index: usize| {
+        let mut h = history.get_untracked();
+        if index < h.len() {
+            h.remove(index);
+            history.set(h.clone());
+            if let Some(win) = web_sys::window() {
+                if let Ok(Some(storage)) = win.local_storage() {
+                    if let Ok(json) = serde_json::to_string(&h) {
+                        let _ = storage.set_item("command_palette_history", &json);
+                    }
+                }
+            }
+        }
+    };
+
+    // Command definitions: (i18n key, action). No hardcoded icons — actions
+    // carry intent, the UI shows text labels.
+    let all_commands = move || -> Vec<(&'static str, Box<dyn Fn()>)> {
+        let locale = i18n::locale();
+        let theme_signal = theme::theme();
+        vec![
+            ("nav.repos", Box::new(|| {}) as Box<dyn Fn()>),
+            ("nav.targets", Box::new(|| {})),
+            ("nav.keys", Box::new(|| {})),
+            ("nav.forge", Box::new(|| {})),
+            ("palette.toggle_theme", Box::new(move || {
+                let next = match theme_signal.get_untracked() {
+                    Theme::System => Theme::Light,
+                    Theme::Light => Theme::Dark,
+                    Theme::Dark => Theme::System,
+                };
+                theme_signal.set(next);
+                open.set(false);
+            })),
+            ("palette.change_language", Box::new(move || {
+                let next = match locale.get_untracked() {
+                    Locale::En => Locale::Zh,
+                    Locale::Zh => Locale::En,
+                };
+                locale.set(next);
+                let code = next.code();
+                spawn_local(async move { let _ = api::set_language(code).await; });
+                open.set(false);
+            })),
+        ]
+    };
+
+    // Filtered commands: if query empty, show history; else substring match.
+    let filtered = move || -> Vec<(String, Box<dyn Fn()>)> {
+        let q = query.get().trim().to_lowercase();
+        if q.is_empty() {
+            // Show history (with dummy actions — clicking a history item re-runs
+            // the search, which then matches the real command).
+            history.get().into_iter().take(10).map(|key| {
+                let k = key.clone();
+                (key, Box::new(move || {
+                    query.set(k.clone());
+                }) as Box<dyn Fn()>)
+            }).collect()
+        } else {
+            all_commands()
+                .into_iter()
+                .filter(|(key, _)| t(key).to_lowercase().contains(&q))
+                .map(|(key, action)| (t(key).to_string(), action))
+                .collect()
+        }
+    };
+
+    // Open: reset query, selected, focus input.
+    create_effect(move |_| {
+        if open.get() {
+            query.set(String::new());
+            selected.set(0);
+            request_animation_frame(move || {
+                if let Some(input) = input_ref.get() {
+                    let _ = input.focus();
+                }
+            });
+        }
+    });
+
+    // Keyboard: ESC close, ArrowUp/Down navigate, Enter execute.
+    let handle = window_event_listener(ev::keydown, move |ev| {
+        if !open.get_untracked() {
+            return;
+        }
+        let key = ev.key();
+        if key.eq_ignore_ascii_case("escape") {
+            ev.prevent_default();
+            open.set(false);
+        } else if key == "ArrowDown" {
+            ev.prevent_default();
+            let items = filtered();
+            if !items.is_empty() {
+                selected.update(|s| *s = (*s + 1).min(items.len() - 1));
+            }
+        } else if key == "ArrowUp" {
+            ev.prevent_default();
+            selected.update(|s| *s = s.saturating_sub(1));
+        } else if key == "Enter" {
+            ev.prevent_default();
+            let items = filtered();
+            let idx = selected.get_untracked();
+            if idx < items.len() {
+                let (label, action) = &items[idx];
+                save_history(label);
+                action();
             }
         }
     });
     on_cleanup(move || handle.remove());
 
     view! {
-        <div class="hidden sm:flex relative items-center w-56">
-            // Leading magnifier (decorative; clicks pass through to the input).
-            <svg class="absolute start-2.5 pointer-events-none shrink-0 size-4 text-muted" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" xmlns="http://www.w3.org/2000/svg">
-                <circle cx="11" cy="11" r="8"></circle>
-                <path d="m21 21-4.3-4.3"></path>
-            </svg>
-            <input
-                node_ref=input_ref
-                type="text"
-                prop:value=move || query.get()
-                on:input=move |ev| query.set(event_target_value(&ev))
-                placeholder=move || t("search.placeholder")
-                class="w-full py-1.5 ps-8 pe-8 text-sm rounded-lg bg-bg border border-border text-content placeholder:text-muted shadow-xs focus:outline-none focus:border-primary transition-colors"
-            />
-            // Trailing slot: ⌘K hint when empty, a clear (×) button when there's text.
-            <Show
-                when=move || !query.get().is_empty()
-                fallback=|| view! {
-                    <span class="absolute end-2 pointer-events-none flex items-center gap-x-1 py-px px-1.5 border border-border rounded-md text-xs text-muted">
-                        <span>"⌘"</span>
-                        <span class="uppercase">"K"</span>
-                    </span>
-                }
+        <Show when=move || open.get()>
+            <div
+                class="fixed inset-0 z-[100] bg-black/50 backdrop-blur-sm flex items-start justify-center pt-[15vh] px-4"
+                on:click=move |_| open.set(false)
             >
-                <button
-                    type="button"
-                    title=move || t("search.clear")
-                    class="absolute end-2 flex justify-center items-center size-5 rounded-md text-muted hover:bg-surface hover:text-content focus:outline-none transition-colors"
-                    on:click=move |_| query.set(String::new())
+                <div
+                    class="w-full max-w-xl bg-surface border border-border rounded-xl shadow-2xl overflow-hidden flex flex-col"
+                    on:click=|ev| ev.stop_propagation()
                 >
-                    <svg class="shrink-0 size-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" xmlns="http://www.w3.org/2000/svg">
-                        <path d="M18 6 6 18"></path>
-                        <path d="m6 6 12 12"></path>
-                    </svg>
-                </button>
-            </Show>
-        </div>
+                    // Search header
+                    <div class="flex items-center gap-3 px-4 py-3 border-b border-border">
+                        <input
+                            node_ref=input_ref
+                            type="text"
+                            prop:value=move || query.get()
+                            on:input=move |ev| {
+                                query.set(event_target_value(&ev));
+                                selected.set(0);
+                            }
+                            placeholder=move || t("palette.placeholder")
+                            class="flex-1 text-base bg-transparent text-content placeholder:text-muted focus:outline-none"
+                        />
+                    </div>
+
+                    // Results list (scrollable)
+                    <div class="max-h-96 overflow-y-auto py-2 px-2">
+                        {move || {
+                            let items = filtered();
+                            let q = query.get();
+                            if items.is_empty() && !q.is_empty() {
+                                view! {
+                                    <div class="py-8 text-center text-sm text-muted">
+                                        {move || t("palette.no_results")}
+                                    </div>
+                                }.into_view()
+                            } else if items.is_empty() {
+                                view! {
+                                    <div class="py-8 text-center text-sm text-muted">
+                                        {move || t("palette.empty_history")}
+                                    </div>
+                                }.into_view()
+                            } else {
+                                let is_history = q.is_empty();
+                                items.into_iter().enumerate().map(|(idx, (label, action))| {
+                                    let active = move || selected.get() == idx;
+                                    let label_clone = label.clone();
+                                    view! {
+                                        <div
+                                            class="flex items-center gap-2 py-2.5 px-3 rounded-lg text-sm cursor-pointer transition-colors"
+                                            class:bg-primary=active
+                                            class:text-on-primary=active
+                                            class:text-content=move || !active()
+                                            class:hover:bg-bg=move || !active()
+                                            on:click=move |_| {
+                                                save_history(&label_clone);
+                                                action();
+                                            }
+                                            on:mouseenter=move |_| selected.set(idx)
+                                        >
+                                            <span class="flex-1">{label.clone()}</span>
+                                            <Show when=move || is_history && active()>
+                                                <button
+                                                    type="button"
+                                                    class="shrink-0 size-5 flex items-center justify-center rounded text-on-primary/70 hover:text-on-primary"
+                                                    on:click=move |ev| {
+                                                        ev.stop_propagation();
+                                                        delete_history(idx);
+                                                    }
+                                                >
+                                                    <svg class="size-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" xmlns="http://www.w3.org/2000/svg">
+                                                        <path d="M18 6 6 18"></path>
+                                                        <path d="m6 6 12 12"></path>
+                                                    </svg>
+                                                </button>
+                                            </Show>
+                                        </div>
+                                    }
+                                }).collect_view()
+                            }
+                        }}
+                    </div>
+
+                    // Footer hints
+                    <div class="flex items-center gap-4 px-4 py-3 border-t border-border text-xs text-muted">
+                        <div class="flex items-center gap-1.5">
+                            <kbd class="px-1.5 py-0.5 bg-bg border border-border rounded text-[10px]">"↑"</kbd>
+                            <kbd class="px-1.5 py-0.5 bg-bg border border-border rounded text-[10px]">"↓"</kbd>
+                            <span>{move || t("palette.navigate")}</span>
+                        </div>
+                        <div class="flex items-center gap-1.5">
+                            <kbd class="px-1.5 py-0.5 bg-bg border border-border rounded text-[10px]">"↵"</kbd>
+                            <span>{move || t("palette.select")}</span>
+                        </div>
+                        <div class="flex items-center gap-1.5">
+                            <kbd class="px-2 py-0.5 bg-bg border border-border rounded text-[10px]">"ESC"</kbd>
+                            <span>{move || t("palette.close")}</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </Show>
     }
 }
 

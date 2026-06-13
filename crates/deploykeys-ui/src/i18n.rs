@@ -101,6 +101,15 @@ const EN: &[(&str, &str)] = &[
     ("settings.theme", "Theme"),
     ("search.placeholder", "Search"),
     ("search.clear", "Clear"),
+    ("palette.trigger", "Search"),
+    ("palette.placeholder", "Type a command or search..."),
+    ("palette.no_results", "No results found"),
+    ("palette.empty_history", "No recent searches"),
+    ("palette.navigate", "Navigate"),
+    ("palette.select", "Select"),
+    ("palette.close", "Close"),
+    ("palette.toggle_theme", "Toggle theme"),
+    ("palette.change_language", "Change language"),
 ];
 
 const ZH: &[(&str, &str)] = &[
@@ -133,4 +142,13 @@ const ZH: &[(&str, &str)] = &[
     ("settings.theme", "主题"),
     ("search.placeholder", "搜索"),
     ("search.clear", "清除"),
+    ("palette.trigger", "搜索"),
+    ("palette.placeholder", "输入命令或搜索..."),
+    ("palette.no_results", "无结果"),
+    ("palette.empty_history", "无搜索记录"),
+    ("palette.navigate", "导航"),
+    ("palette.select", "选择"),
+    ("palette.close", "关闭"),
+    ("palette.toggle_theme", "切换主题"),
+    ("palette.change_language", "切换语言"),
 ];
