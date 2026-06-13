@@ -175,6 +175,11 @@ fn Main(
         account.set(None);
     };
 
+    // Shared search query. Bound to the header search box; today it filters the
+    // sidebar nav, and is the hook the repos/targets/keys screens will read once
+    // they land.
+    let query = RwSignal::new(String::new());
+
     view! {
         // Standard web-admin layout: a top title bar, then a body row split into
         // a left sidebar (section nav) and a right content area.
@@ -216,41 +221,84 @@ fn Main(
                 // fall back to text selection instead of moving the window.
                 <div data-tauri-drag-region="" class="flex-1 self-stretch"></div>
 
-                // Right: signed-in identity + sign out, or a sign-in button.
-                <div class="flex items-center gap-3">
-                    {move || match account.get() {
-                        Some(acct) => view! {
-                            <span class="text-sm text-muted whitespace-nowrap pointer-events-none">{format!("@{}", acct.login)}</span>
-                            <button
-                                type="button"
-                                class="py-2 px-3 text-xs font-medium rounded-lg border border-border text-muted hover:bg-bg focus:outline-none transition-colors"
-                                on:click=sign_out
-                            >
-                                {move || t("common.sign_out")}
-                            </button>
-                        }.into_view(),
-                        None => view! {
-                            <button
-                                type="button"
-                                class="py-2 px-4 text-sm font-medium rounded-lg bg-primary text-on-primary hover:bg-primary-hover focus:outline-none disabled:opacity-50 disabled:pointer-events-none transition-colors"
-                                prop:disabled=signing_in
-                                on:click=move |_| on_sign_in.call(())
-                            >
-                                {move || if signing_in.get() { t("welcome.signing_in") } else { t("welcome.sign_in") }}
-                            </button>
-                        }.into_view(),
-                    }}
-                </div>
+                // Right: search box + language toggle + theme toggle. Sizing and
+                // shape follow Preline's search-trigger and icon-button specs; the
+                // interactions are wired to our own i18n/theme signals.
+                <SearchBox query=query />
+                <LanguageToggle />
+                <ThemeToggle />
             </header>
 
             // Body: sidebar (left) + content (right).
             <div class="flex-1 flex min-h-0">
-                // Left sidebar: vertical section nav.
-                <aside class="shrink-0 w-60 bg-surface border-r border-border flex flex-col py-3 px-2 gap-1 overflow-y-auto">
-                    <NavItem label=move || t("nav.repos") active=true />
-                    <NavItem label=move || t("nav.targets") active=false />
-                    <NavItem label=move || t("nav.keys") active=false />
-                    <NavItem label=move || t("nav.forge") active=false />
+                // Left sidebar: vertical section nav at the top, account controls
+                // (sign in / signed-in identity + sign out) pinned to the bottom.
+                <aside class="shrink-0 w-60 bg-surface border-r border-border flex flex-col overflow-y-auto">
+                    <nav class="flex flex-col gap-1 py-3 px-2">
+                        {move || {
+                            // Data-driven nav: (translation key, active). The
+                            // shared search query filters it live by matching the
+                            // translated label (case-insensitive). The same query
+                            // will filter repos/targets/keys once those land.
+                            let q = query.get().trim().to_lowercase();
+                            [
+                                ("nav.repos", true),
+                                ("nav.targets", false),
+                                ("nav.keys", false),
+                                ("nav.forge", false),
+                            ]
+                            .into_iter()
+                            .filter(|(key, _)| {
+                                q.is_empty() || t(key).to_lowercase().contains(&q)
+                            })
+                            .map(|(key, active)| {
+                                view! { <NavItem label=move || t(key) active=active /> }
+                            })
+                            .collect_view()
+                        }}
+                    </nav>
+
+                    // Spacer pushes the account block to the bottom.
+                    <div class="flex-1"></div>
+
+                    // Account block: bottom of the sidebar, above a divider.
+                    <div class="shrink-0 p-3 border-t border-border">
+                        {move || match account.get() {
+                            Some(acct) => view! {
+                                <div class="flex items-center gap-2">
+                                    <div class="flex items-center justify-center size-8 shrink-0 rounded-full bg-primary-soft text-primary text-sm font-semibold uppercase">
+                                        {acct.login.chars().next().unwrap_or('?').to_string()}
+                                    </div>
+                                    <span class="flex-1 min-w-0 truncate text-sm text-content">{format!("@{}", acct.login)}</span>
+                                    <button
+                                        type="button"
+                                        title=move || t("common.sign_out")
+                                        class="shrink-0 flex justify-center items-center size-8 rounded-lg text-muted hover:bg-bg hover:text-content focus:outline-none transition-colors"
+                                        on:click=sign_out
+                                    >
+                                        <svg class="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" xmlns="http://www.w3.org/2000/svg">
+                                            <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path>
+                                            <polyline points="16 17 21 12 16 7"></polyline>
+                                            <line x1="21" x2="9" y1="12" y2="12"></line>
+                                        </svg>
+                                    </button>
+                                </div>
+                            }.into_view(),
+                            None => view! {
+                                <button
+                                    type="button"
+                                    class="w-full inline-flex justify-center items-center gap-x-2 py-2 px-4 text-sm font-medium rounded-lg bg-primary text-on-primary hover:bg-primary-hover focus:outline-none disabled:opacity-50 disabled:pointer-events-none transition-colors"
+                                    prop:disabled=signing_in
+                                    on:click=move |_| on_sign_in.call(())
+                                >
+                                    <svg class="size-4 shrink-0" viewBox="0 0 24 24" fill="currentColor" xmlns="http://www.w3.org/2000/svg">
+                                        <path d="M12 .5C5.73.5.5 5.73.5 12c0 5.08 3.29 9.39 7.86 10.91.58.11.79-.25.79-.56 0-.28-.01-1.02-.02-2-3.2.7-3.88-1.54-3.88-1.54-.52-1.33-1.28-1.69-1.28-1.69-1.05-.72.08-.7.08-.7 1.16.08 1.77 1.19 1.77 1.19 1.03 1.77 2.7 1.26 3.36.96.1-.75.4-1.26.73-1.55-2.55-.29-5.23-1.28-5.23-5.69 0-1.26.45-2.29 1.19-3.1-.12-.29-.52-1.46.11-3.05 0 0 .97-.31 3.18 1.18a11.1 11.1 0 0 1 2.9-.39c.98 0 1.97.13 2.9.39 2.2-1.49 3.17-1.18 3.17-1.18.63 1.59.23 2.76.11 3.05.74.81 1.19 1.84 1.19 3.1 0 4.42-2.69 5.39-5.25 5.68.41.36.78 1.06.78 2.14 0 1.55-.01 2.8-.01 3.18 0 .31.21.68.8.56A11.51 11.51 0 0 0 23.5 12C23.5 5.73 18.27.5 12 .5z"/>
+                                    </svg>
+                                    {move || if signing_in.get() { t("welcome.signing_in") } else { t("welcome.sign_in") }}
+                                </button>
+                            }.into_view(),
+                        }}
+                    </div>
                 </aside>
 
                 // Right content area — the section content comes in a later phase.
@@ -279,6 +327,199 @@ fn NavItem(#[prop(into)] label: Signal<&'static str>, active: bool) -> impl Into
         "w-full flex items-center py-2 px-3 text-sm font-medium rounded-lg text-muted hover:bg-bg hover:text-content transition-colors"
     };
     view! { <button type="button" class=class>{move || label.get()}</button> }
+}
+
+/// Header search field. A real controlled input bound to the shared `query`
+/// signal (so the rest of the UI can react to it — today it filters the sidebar
+/// nav, later it will filter repos/targets/keys). Styled after Preline's search
+/// input: rounded, bordered, leading magnifier, with a trailing ⌘K badge that
+/// becomes a clear button once there is text. Cmd/Ctrl+K focuses it from
+/// anywhere.
+#[component]
+fn SearchBox(query: RwSignal<String>) -> impl IntoView {
+    let input_ref = NodeRef::<html::Input>::new();
+
+    // Cmd/Ctrl+K focuses the search input from anywhere in the window.
+    let handle = window_event_listener(ev::keydown, move |ev| {
+        if (ev.meta_key() || ev.ctrl_key()) && ev.key().eq_ignore_ascii_case("k") {
+            ev.prevent_default();
+            if let Some(input) = input_ref.get() {
+                let _ = input.focus();
+            }
+        }
+    });
+    on_cleanup(move || handle.remove());
+
+    view! {
+        <div class="hidden sm:flex relative items-center w-56">
+            // Leading magnifier (decorative; clicks pass through to the input).
+            <svg class="absolute start-2.5 pointer-events-none shrink-0 size-4 text-muted" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" xmlns="http://www.w3.org/2000/svg">
+                <circle cx="11" cy="11" r="8"></circle>
+                <path d="m21 21-4.3-4.3"></path>
+            </svg>
+            <input
+                node_ref=input_ref
+                type="text"
+                prop:value=move || query.get()
+                on:input=move |ev| query.set(event_target_value(&ev))
+                placeholder=move || t("search.placeholder")
+                class="w-full py-1.5 ps-8 pe-8 text-sm rounded-lg bg-bg border border-border text-content placeholder:text-muted shadow-xs focus:outline-none focus:border-primary transition-colors"
+            />
+            // Trailing slot: ⌘K hint when empty, a clear (×) button when there's text.
+            <Show
+                when=move || !query.get().is_empty()
+                fallback=|| view! {
+                    <span class="absolute end-2 pointer-events-none flex items-center gap-x-1 py-px px-1.5 border border-border rounded-md text-xs text-muted">
+                        <span>"⌘"</span>
+                        <span class="uppercase">"K"</span>
+                    </span>
+                }
+            >
+                <button
+                    type="button"
+                    title=move || t("search.clear")
+                    class="absolute end-2 flex justify-center items-center size-5 rounded-md text-muted hover:bg-surface hover:text-content focus:outline-none transition-colors"
+                    on:click=move |_| query.set(String::new())
+                >
+                    <svg class="shrink-0 size-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" xmlns="http://www.w3.org/2000/svg">
+                        <path d="M18 6 6 18"></path>
+                        <path d="m6 6 12 12"></path>
+                    </svg>
+                </button>
+            </Show>
+        </div>
+    }
+}
+
+/// Header icon button shape, shared by the language and theme toggles. Follows
+/// Preline's icon-button sizing (square, centered, rounded, hover surface).
+#[component]
+fn IconButton(
+    #[prop(into)] title: Signal<&'static str>,
+    on_click: Callback<()>,
+    children: Children,
+) -> impl IntoView {
+    view! {
+        <button
+            type="button"
+            title=move || title.get()
+            class="shrink-0 flex justify-center items-center size-9 rounded-lg text-muted hover:bg-bg hover:text-content focus:outline-none transition-colors"
+            on:click=move |_| on_click.call(())
+        >
+            {children()}
+        </button>
+    }
+}
+
+/// Language picker: an icon button that opens a dropdown listing every
+/// supported locale (driven by `Locale::ALL`, so adding languages needs no
+/// markup changes here). Selecting one applies it and persists the choice to
+/// the backend. Styled after Preline's dropdown (rounded, bordered, shadowed
+/// panel with hover rows and a check on the active item). Open/close is driven
+/// by a local signal — no Preline JS — and a transparent full-screen backdrop
+/// catches click-outside to close.
+#[component]
+fn LanguageToggle() -> impl IntoView {
+    let locale = i18n::locale();
+    let open = RwSignal::new(false);
+
+    let select = move |next: Locale| {
+        locale.set(next);
+        open.set(false);
+        let code = next.code();
+        spawn_local(async move {
+            let _ = api::set_language(code).await;
+        });
+    };
+
+    view! {
+        <div class="relative">
+            <IconButton
+                title=move || t("settings.language")
+                on_click=Callback::new(move |_| open.update(|o| *o = !*o))
+            >
+                <svg class="shrink-0 size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" xmlns="http://www.w3.org/2000/svg">
+                    <circle cx="12" cy="12" r="10"></circle>
+                    <path d="M2 12h20"></path>
+                    <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"></path>
+                </svg>
+            </IconButton>
+
+            <Show when=move || open.get()>
+                // Click-outside backdrop: a transparent full-screen layer behind
+                // the menu that closes it when clicked.
+                <div class="fixed inset-0 z-40" on:click=move |_| open.set(false)></div>
+
+                // Dropdown panel (Preline dropdown spec).
+                <div class="absolute end-0 mt-2 z-50 w-44 max-h-80 overflow-y-auto p-1 bg-surface border border-border rounded-xl shadow-xl">
+                    {Locale::ALL.iter().copied().map(|loc| {
+                        let active = move || locale.get() == loc;
+                        view! {
+                            <button
+                                type="button"
+                                class="w-full flex items-center gap-x-3 py-2 px-2.5 rounded-lg text-sm text-content hover:bg-bg focus:outline-none focus:bg-bg transition-colors"
+                                on:click=move |_| select(loc)
+                            >
+                                <svg
+                                    class="shrink-0 size-4 text-primary"
+                                    class:opacity-0=move || !active()
+                                    viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" xmlns="http://www.w3.org/2000/svg"
+                                >
+                                    <path d="M20 6 9 17l-5-5"></path>
+                                </svg>
+                                <span class="grow text-left">{loc.native_name()}</span>
+                            </button>
+                        }
+                    }).collect_view()}
+                </div>
+            </Show>
+        </div>
+    }
+}
+
+/// Theme toggle: cycles System → Light → Dark and shows an icon for the current
+/// mode (auto / sun / moon).
+#[component]
+fn ThemeToggle() -> impl IntoView {
+    let theme = theme::theme();
+    let toggle = move |_| {
+        let next = match theme.get_untracked() {
+            Theme::System => Theme::Light,
+            Theme::Light => Theme::Dark,
+            Theme::Dark => Theme::System,
+        };
+        theme.set(next);
+    };
+    view! {
+        <IconButton title=move || t("settings.theme") on_click=Callback::new(toggle)>
+            {move || match theme.get() {
+                // Sun (light)
+                Theme::Light => view! {
+                    <svg class="shrink-0 size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" xmlns="http://www.w3.org/2000/svg">
+                        <circle cx="12" cy="12" r="4"></circle>
+                        <path d="M12 2v2"></path><path d="M12 20v2"></path>
+                        <path d="m4.93 4.93 1.41 1.41"></path><path d="m17.66 17.66 1.41 1.41"></path>
+                        <path d="M2 12h2"></path><path d="M20 12h2"></path>
+                        <path d="m6.34 17.66-1.41 1.41"></path><path d="m19.07 4.93-1.41 1.41"></path>
+                    </svg>
+                }.into_view(),
+                // Moon (dark)
+                Theme::Dark => view! {
+                    <svg class="shrink-0 size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" xmlns="http://www.w3.org/2000/svg">
+                        <path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"></path>
+                    </svg>
+                }.into_view(),
+                // Monitor (system / auto)
+                Theme::System => view! {
+                    <svg class="shrink-0 size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" xmlns="http://www.w3.org/2000/svg">
+                        <rect width="20" height="14" x="2" y="3" rx="2"></rect>
+                        <line x1="8" x2="16" y1="21" y2="21"></line>
+                        <line x1="12" x2="12" y1="17" y2="21"></line>
+                    </svg>
+                }.into_view(),
+            }}
+        </IconButton>
+    }
 }
 
 /// Read the webview's language (e.g. `zh-CN`) and map it to a supported locale.

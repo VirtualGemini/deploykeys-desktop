@@ -13,12 +13,25 @@ pub enum Locale {
 }
 
 impl Locale {
-    /// The locale code (`en`/`zh`). Reserved for the future settings picker.
-    #[allow(dead_code)]
+    /// Every supported locale, in menu order. The language picker iterates this,
+    /// so adding a language is a matter of extending the enum + this list (plus
+    /// its string table below) — no UI changes needed.
+    pub const ALL: &'static [Locale] = &[Locale::En, Locale::Zh];
+
+    /// The locale code (`en`/`zh`), used for persistence and `from_code`.
     pub fn code(self) -> &'static str {
         match self {
             Locale::En => "en",
             Locale::Zh => "zh",
+        }
+    }
+
+    /// The language's own name, shown in the picker (always in that language,
+    /// the convention for language selectors so users find their own tongue).
+    pub fn native_name(self) -> &'static str {
+        match self {
+            Locale::En => "English",
+            Locale::Zh => "简体中文",
         }
     }
 
@@ -85,6 +98,9 @@ const EN: &[(&str, &str)] = &[
     ("common.cancel", "Cancel"),
     ("common.sign_out", "Sign out"),
     ("settings.language", "Language"),
+    ("settings.theme", "Theme"),
+    ("search.placeholder", "Search"),
+    ("search.clear", "Clear"),
 ];
 
 const ZH: &[(&str, &str)] = &[
@@ -114,4 +130,7 @@ const ZH: &[(&str, &str)] = &[
     ("common.cancel", "取消"),
     ("common.sign_out", "退出登录"),
     ("settings.language", "语言"),
+    ("settings.theme", "主题"),
+    ("search.placeholder", "搜索"),
+    ("search.clear", "清除"),
 ];

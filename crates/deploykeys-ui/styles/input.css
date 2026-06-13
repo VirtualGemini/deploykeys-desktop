@@ -37,3 +37,27 @@
   --color-primary-soft: #1e2a3a;
   --color-on-primary: #ffffff;
 }
+
+/* Smooth theme switching. Without this, large surfaces (bg-bg, bg-surface) have
+   no transition and snap instantly while small buttons with `transition-colors`
+   fade — that mismatch reads as a flicker. A uniform color transition on every
+   element makes the whole UI cross-fade together when `.dark` toggles.
+
+   - Only color-ish properties transition (not transform/layout), so it can't
+     animate sizes or positions.
+   - It lives in @layer base, so any element with an explicit Tailwind
+     `transition-*` / `duration-*` utility (utilities layer wins) keeps its own.
+   - Gated on prefers-reduced-motion so motion-sensitive users get instant
+     switches. */
+@layer base {
+  @media (prefers-reduced-motion: no-preference) {
+    *,
+    ::before,
+    ::after {
+      transition-property: background-color, border-color, color, fill, stroke,
+        outline-color, text-decoration-color;
+      transition-duration: 200ms;
+      transition-timing-function: ease;
+    }
+  }
+}
