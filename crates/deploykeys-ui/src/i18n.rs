@@ -104,7 +104,16 @@ const EN: &[(&str, &str)] = &[
         "This screen will be implemented in Phase 4",
     ),
     ("common.cancel", "Cancel"),
+    ("common.confirm", "Confirm"),
     ("common.sign_out", "Sign out"),
+    (
+        "sign_out.confirm_title",
+        "Confirm sign out",
+    ),
+    (
+        "sign_out.confirm_message",
+        "After signing out, you will need to sign in again to manage your GitHub Deploy Keys.",
+    ),
     ("sidebar.collapse", "Collapse sidebar"),
     ("sidebar.expand", "Expand sidebar"),
     ("settings.language", "Language"),
@@ -189,7 +198,16 @@ const ZH: &[(&str, &str)] = &[
     ("session.not_signed_in", "未登录"),
     ("screen.placeholder_phase4", "此界面将在 Phase 4 实现"),
     ("common.cancel", "取消"),
+    ("common.confirm", "确认"),
     ("common.sign_out", "退出登录"),
+    (
+        "sign_out.confirm_title",
+        "确认退出登录",
+    ),
+    (
+        "sign_out.confirm_message",
+        "退出登录后你需要再次登录才能管理你的 GitHub Deploy Keys，点击确认后你将退出登录。",
+    ),
     ("sidebar.collapse", "收起菜单"),
     ("sidebar.expand", "展开菜单"),
     ("settings.language", "语言"),

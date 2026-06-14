@@ -282,6 +282,8 @@ fn Main(
 
     let mouse_in_sidebar = RwSignal::new(false);
 
+    let sign_out_confirm_open = RwSignal::new(false);
+
     view! {
         // Standard web-admin layout: a top title bar, then a body row split into
         // a left sidebar (section nav) and a right content area.
@@ -399,25 +401,49 @@ fn Main(
                                             <span class=username_class>{login}</span>
                                         </button>
 
-                                        <Show when=move || dropdown_open.get() && !sidebar_collapsed.get()>
-                                            // Click-outside backdrop
-                                            <div class="fixed inset-0 z-40" on:click=move |_| dropdown_open.set(false)></div>
+                                        {move || if dropdown_open.get() && sidebar_collapsed.get() {
+                                            view! {
+                                                // Click-outside backdrop
+                                                <div class="fixed inset-0 z-40" on:click=move |_| dropdown_open.set(false)></div>
 
-                                            // Dropdown menu
-                                            <div class="absolute bottom-full left-2 mb-2 z-50 w-[calc(100%-16px)] p-1 bg-surface border border-border rounded-xl shadow-xl">
-                                                <button
-                                                    type="button"
-                                                    class="w-full flex items-center gap-x-3 py-2 px-2.5 rounded-lg text-sm text-content hover:bg-bg focus:outline-none transition-colors"
-                                                    on:click=move |_| {
-                                                        dropdown_open.set(false);
-                                                        sign_out(());
-                                                    }
-                                                >
-                                                    <Icon name=IconName::SignOut class="size-4" />
-                                                    <span class="grow text-left">{move || t("common.sign_out")}</span>
-                                                </button>
-                                            </div>
-                                        </Show>
+                                                // Collapsed: icon-only popover
+                                                <div class="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 z-50 p-1 bg-surface border border-border rounded-xl shadow-xl">
+                                                    <button
+                                                        type="button"
+                                                        title=move || t("common.sign_out")
+                                                        class="flex items-center justify-center size-8 rounded-lg text-content hover:bg-bg focus:outline-none transition-colors"
+                                                        on:click=move |_| {
+                                                            dropdown_open.set(false);
+                                                            sign_out_confirm_open.set(true);
+                                                        }
+                                                    >
+                                                        <Icon name=IconName::SignOut class="size-4" />
+                                                    </button>
+                                                </div>
+                                            }.into_view()
+                                        } else if dropdown_open.get() && !sidebar_collapsed.get() {
+                                            view! {
+                                                // Click-outside backdrop
+                                                <div class="fixed inset-0 z-40" on:click=move |_| dropdown_open.set(false)></div>
+
+                                                // Expanded: dropdown menu
+                                                <div class="absolute bottom-full left-2 mb-2 z-50 w-[calc(100%-16px)] p-1 bg-surface border border-border rounded-xl shadow-xl">
+                                                    <button
+                                                        type="button"
+                                                        class="w-full flex items-center gap-x-3 py-2 px-2.5 rounded-lg text-sm text-content hover:bg-bg focus:outline-none transition-colors"
+                                                        on:click=move |_| {
+                                                            dropdown_open.set(false);
+                                                            sign_out_confirm_open.set(true);
+                                                        }
+                                                    >
+                                                        <Icon name=IconName::SignOut class="size-4" />
+                                                        <span class="grow text-left">{move || t("common.sign_out")}</span>
+                                                    </button>
+                                                </div>
+                                            }.into_view()
+                                        } else {
+                                            ().into_view()
+                                        }}
                                     </div>
                                 }.into_view()
                             },
@@ -503,6 +529,41 @@ fn Main(
                         }}
                     </div>
                 </main>
+            </div>
+
+            // Sign out confirmation dialog
+            <div class=move || {
+                if sign_out_confirm_open.get() {
+                    "fixed inset-0 z-[100] bg-black/50 backdrop-blur-sm flex items-center justify-center px-4 opacity-100 transition-opacity duration-300"
+                } else {
+                    "fixed inset-0 z-[100] bg-black/50 backdrop-blur-sm flex items-center justify-center px-4 opacity-0 pointer-events-none transition-opacity duration-300"
+                }
+            }>
+                <div class="w-full max-w-md bg-surface border border-border rounded-xl shadow-2xl overflow-hidden flex flex-col scale-100 transition-transform duration-300">
+                    <div class="px-6 py-5">
+                        <h2 class="text-base font-semibold text-content">{move || t("sign_out.confirm_title")}</h2>
+                        <p class="mt-2 text-sm text-muted">{move || t("sign_out.confirm_message")}</p>
+                    </div>
+                    <div class="flex justify-end gap-2 px-6 py-4 border-t border-border">
+                        <button
+                            type="button"
+                            class="px-4 py-2 text-sm font-medium rounded-lg bg-bg text-content hover:text-primary focus:outline-none transition-colors"
+                            on:click=move |_| sign_out_confirm_open.set(false)
+                        >
+                            {move || t("common.cancel")}
+                        </button>
+                        <button
+                            type="button"
+                            class="px-4 py-2 text-sm font-medium rounded-lg bg-primary text-on-primary hover:bg-primary-hover focus:outline-none transition-colors"
+                            on:click=move |_| {
+                                sign_out_confirm_open.set(false);
+                                sign_out(());
+                            }
+                        >
+                            {move || t("common.confirm")}
+                        </button>
+                    </div>
+                </div>
             </div>
         </div>
     }
