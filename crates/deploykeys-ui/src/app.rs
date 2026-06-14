@@ -394,7 +394,7 @@ fn Main(
                                         <button
                                             type="button"
                                             title=login.clone()
-                                            class="w-full flex items-center gap-2.5 h-10 pl-[16px] pr-3 rounded-lg hover:bg-bg transition-colors"
+                                            class="w-full flex items-center gap-2.5 h-10 pl-[16px] pr-3 rounded-lg hover:bg-bg"
                                             on:click=move |_| dropdown_open.update(|o| *o = !*o)
                                         >
                                             <AccountAvatar account=acct.clone() />
@@ -411,7 +411,7 @@ fn Main(
                                                     <button
                                                         type="button"
                                                         title=move || t("common.sign_out")
-                                                        class="flex items-center justify-center size-8 rounded-lg text-content hover:bg-bg focus:outline-none transition-colors"
+                                                        class="flex items-center justify-center size-8 rounded-lg text-content hover:bg-bg focus:outline-none"
                                                         on:click=move |_| {
                                                             dropdown_open.set(false);
                                                             sign_out_confirm_open.set(true);
@@ -430,7 +430,7 @@ fn Main(
                                                 <div class="absolute bottom-full left-2 mb-2 z-50 w-[calc(100%-16px)] p-1 bg-surface border border-border rounded-xl shadow-xl">
                                                     <button
                                                         type="button"
-                                                        class="w-full flex items-center gap-x-3 py-2 px-2.5 rounded-lg text-sm text-content hover:bg-bg focus:outline-none transition-colors"
+                                                        class="w-full flex items-center gap-x-3 py-2 px-2.5 rounded-lg text-sm text-content hover:bg-bg focus:outline-none"
                                                         on:click=move |_| {
                                                             dropdown_open.set(false);
                                                             sign_out_confirm_open.set(true);
@@ -547,14 +547,14 @@ fn Main(
                     <div class="flex justify-end gap-2 px-6 py-4 border-t border-border">
                         <button
                             type="button"
-                            class="px-4 py-2 text-sm font-medium rounded-lg bg-bg text-content hover:text-primary focus:outline-none transition-colors"
+                            class="px-4 py-2 text-sm font-medium rounded-lg bg-bg text-content hover:text-primary focus:outline-none"
                             on:click=move |_| sign_out_confirm_open.set(false)
                         >
                             {move || t("common.cancel")}
                         </button>
                         <button
                             type="button"
-                            class="px-4 py-2 text-sm font-medium rounded-lg bg-primary text-on-primary hover:bg-primary-hover focus:outline-none transition-colors"
+                            class="px-4 py-2 text-sm font-medium rounded-lg bg-primary text-on-primary hover:bg-primary-hover focus:outline-none"
                             on:click=move |_| {
                                 sign_out_confirm_open.set(false);
                                 sign_out(());
@@ -582,7 +582,7 @@ fn NavItem(
         if active.get() {
             "w-full flex items-center gap-2.5 h-10 pl-[24px] pr-3 overflow-hidden text-sm font-medium rounded-lg bg-primary-soft text-primary hover:bg-primary-soft/80"
         } else {
-            "w-full flex items-center gap-2.5 h-10 pl-[24px] pr-3 overflow-hidden text-sm font-medium rounded-lg text-muted hover:bg-bg hover:text-content transition-colors"
+            "w-full flex items-center gap-2.5 h-10 pl-[24px] pr-3 overflow-hidden text-sm font-medium rounded-lg text-muted hover:bg-bg hover:text-content"
         }
     };
     let wrapper_class = "pr-[7px]";
@@ -707,7 +707,7 @@ fn CommandPaletteTrigger(on_open: Callback<()>) -> impl IntoView {
     view! {
         <button
             type="button"
-            class="hidden sm:inline-flex items-center justify-between gap-x-3 w-56 h-9 px-2.5 text-sm rounded-lg bg-bg border border-border text-muted hover:bg-surface focus:outline-none transition-colors"
+            class="hidden sm:inline-flex items-center justify-between gap-x-3 w-56 h-9 px-2.5 text-sm rounded-lg bg-bg border border-border text-muted hover:bg-surface focus:outline-none"
             on:click=move |_| on_open.call(())
         >
             <span class="text-xs">{move || t("palette.trigger")}</span>
@@ -949,7 +949,7 @@ fn CommandPalette(
                                     let label_clone = label.clone();
                                     view! {
                                         <div
-                                            class="flex items-center gap-3 py-2.5 px-3 rounded-lg text-sm cursor-pointer transition-colors"
+                                            class="flex items-center gap-3 py-2.5 px-3 rounded-lg text-sm cursor-pointer"
                                             class:bg-primary=active
                                             class:text-on-primary=active
                                             class:text-content=move || !active()
@@ -1018,7 +1018,7 @@ fn IconButton(
         <button
             type="button"
             title=move || title.get()
-            class="shrink-0 flex justify-center items-center size-8 rounded-lg text-muted hover:bg-bg hover:text-content focus:outline-none transition-colors"
+            class="shrink-0 flex justify-center items-center size-8 rounded-lg text-muted hover:bg-bg hover:text-content focus:outline-none"
             on:click=move |_| on_click.call(())
         >
             {children()}
@@ -1085,7 +1085,7 @@ fn QuickRoutesMenu(
                                 view! {
                                     <button
                                         type="button"
-                                        class="w-full flex items-center gap-x-2 py-2 px-2.5 rounded-lg text-sm text-content hover:bg-surface focus:outline-none focus:bg-surface transition-colors"
+                                        class="w-full flex items-center gap-x-2 py-2 px-2.5 rounded-lg text-sm text-content hover:bg-surface focus:outline-none focus:bg-surface"
                                         on:click=move |_| {
                                             current_section.set(section);
                                             open.set(false);
@@ -1104,7 +1104,7 @@ fn QuickRoutesMenu(
                                     <button
                                         type="button"
                                         title=item.url
-                                        class="w-full flex items-center justify-between gap-x-3 py-2 px-2.5 rounded-lg text-sm text-content hover:bg-bg focus:outline-none focus:bg-bg transition-colors"
+                                        class="w-full flex items-center justify-between gap-x-3 py-2 px-2.5 rounded-lg text-sm text-content hover:bg-bg focus:outline-none focus:bg-bg"
                                         on:click=move |_| open_route(item.url)
                                     >
                                         <span class="min-w-0 truncate text-left">{move || t(item.label_key)}</span>
@@ -1176,7 +1176,7 @@ fn LanguageToggle(
                         view! {
                             <button
                                 type="button"
-                                class="w-full flex items-center gap-x-3 py-2 px-2.5 rounded-lg text-sm text-content hover:bg-bg focus:outline-none focus:bg-bg transition-colors"
+                                class="w-full flex items-center gap-x-3 py-2 px-2.5 rounded-lg text-sm text-content hover:bg-bg focus:outline-none focus:bg-bg"
                                 on:click=move |_| select(loc)
                             >
                                 {move || {

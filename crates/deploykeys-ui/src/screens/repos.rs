@@ -269,7 +269,7 @@ pub fn Repos(
                                         let Repo { full_name, private, language, archived, html_url, .. } = r;
                                         view! {
                                             <li
-                                                class="flex items-center gap-3 py-3 px-4 rounded-lg border border-border bg-surface hover:bg-bg cursor-pointer transition-colors"
+                                                class="flex items-center gap-3 py-3 px-4 rounded-lg border border-border bg-surface hover:bg-bg cursor-pointer"
                                                 on:click={
                                                     let url = html_url.clone();
                                                     move |_| open_repo(url.clone())
@@ -339,7 +339,7 @@ fn FilterDropdown(
             // Trigger aligns in height with the search input (py-2), text not icon.
             <button
                 type="button"
-                class="inline-flex items-center justify-center w-36 h-10 px-3 text-sm rounded-lg border border-border bg-bg text-content hover:bg-surface focus:outline-none transition-colors whitespace-nowrap"
+                class="inline-flex items-center justify-center w-36 h-10 px-3 text-sm rounded-lg border border-border bg-bg text-content hover:bg-surface focus:outline-none whitespace-nowrap"
                 on:click=move |_| open.update(|o| *o = !*o)
             >
                 <span class="min-w-0 truncate">{move || label.get()}</span>
@@ -367,7 +367,7 @@ fn FilterDropdown(
                             view! {
                                 <button
                                     type="button"
-                                    class="w-full flex items-center gap-x-2 py-1 px-2.5 rounded-lg text-sm text-content hover:bg-bg focus:outline-none focus:bg-bg transition-colors whitespace-nowrap"
+                                    class="w-full flex items-center gap-x-2 py-1 px-2.5 rounded-lg text-sm text-content hover:bg-bg focus:outline-none focus:bg-bg whitespace-nowrap"
                                     on:click=choose
                                 >
                                     {move || {
@@ -390,7 +390,7 @@ fn FilterDropdown(
 }
 
 /// Shared classes for pager icon buttons (prev/next).
-const PAGER_CELL: &str = "inline-flex items-center justify-center min-w-[2rem] h-8 px-2 text-sm rounded-md text-muted transition-colors hover:bg-surface hover:text-content disabled:opacity-40 disabled:pointer-events-none";
+const PAGER_CELL: &str = "inline-flex items-center justify-center min-w-[2rem] h-8 px-2 text-sm rounded-md text-muted hover:bg-surface hover:text-content disabled:opacity-40 disabled:pointer-events-none";
 
 /// Full pagination bar below the list: total · prev/next with page indicator ·
 /// page-size · "go to page" input.
@@ -492,7 +492,7 @@ fn PageSizeSelector() -> impl IntoView {
                 // Trigger: shows the current page size; caret flips with open state.
                 <button
                     type="button"
-                    class="inline-flex items-center justify-center gap-1 min-w-[3.25rem] h-8 px-2.5 text-sm rounded-md text-content hover:bg-surface focus:outline-none transition-colors"
+                    class="inline-flex items-center justify-center gap-1 min-w-[3.25rem] h-8 px-2.5 text-sm rounded-md text-content hover:bg-surface focus:outline-none"
                     on:click=move |_| open.update(|o| *o = !*o)
                 >
                     <span>{move || current.get()}</span>
@@ -513,7 +513,7 @@ fn PageSizeSelector() -> impl IntoView {
                                             if is_active() {
                                                 "w-full flex items-center justify-center h-8 px-2.5 rounded-lg text-sm bg-primary-soft text-primary"
                                             } else {
-                                                "w-full flex items-center justify-center h-8 px-2.5 rounded-lg text-sm text-content hover:bg-bg transition-colors"
+                                                "w-full flex items-center justify-center h-8 px-2.5 rounded-lg text-sm text-content hover:bg-bg"
                                             }
                                         }
                                         on:click=move |_| {

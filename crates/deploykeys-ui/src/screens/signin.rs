@@ -83,7 +83,7 @@ pub fn SignIn(
 
             <button
                 type="button"
-                class="py-2 px-5 text-sm rounded-lg border border-border text-muted hover:bg-surface focus:outline-none transition-colors"
+                class="py-2 px-5 text-sm rounded-lg border border-border text-muted hover:bg-surface focus:outline-none"
                 on:click=move |_| on_cancel.call(())
             >
                 {move || t("common.cancel")}
