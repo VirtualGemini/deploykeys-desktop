@@ -10,5 +10,5 @@ pub use account::{Account, AuthType};
 pub use key_binding::{
     DeployKeyPermission, KeyAlgorithm, KeyBinding, KeyBindingStatus, KeyResidency,
 };
-pub use repository::{AccountType, GitHubInstallation, Repository, RepositorySelection};
+pub use repository::Repository;
 pub use target::{AuthMethod, OsType, Target, TargetStatus, TargetType};

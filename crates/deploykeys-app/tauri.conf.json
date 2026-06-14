@@ -21,10 +21,10 @@
       {
         "label": "main",
         "title": "DeployKeys Desktop",
-        "width": 1024,
-        "height": 768,
+        "width": 900,
+        "height": 570,
         "minWidth": 800,
-        "minHeight": 600,
+        "minHeight": 570,
         "resizable": true,
         "titleBarStyle": "Overlay",
         "hiddenTitle": true,

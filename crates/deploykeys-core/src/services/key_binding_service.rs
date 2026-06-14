@@ -169,17 +169,10 @@ impl KeyBindingService {
             .await?
             .ok_or_else(|| Error::NotFound("Repository not found".into()))?;
 
-        let installation = self
-            .db
-            .installations()
-            .find_by_id(repo.installation_id)
-            .await?
-            .ok_or_else(|| Error::NotFound("Installation not found".into()))?;
-
         let account = self
             .db
             .accounts()
-            .find_by_id(installation.account_id)
+            .find_by_id(repo.account_id)
             .await?
             .ok_or_else(|| Error::NotFound("Account not found".into()))?;
 
@@ -243,14 +236,11 @@ async fn remove_local_key_files(private_path: &Path) {
 mod tests {
     use super::*;
     use crate::credentials::test_support::use_mock_keyring;
-    use crate::db::test_support::{
-        seed_account, seed_installation, seed_repository, seed_target, test_db,
-    };
+    use crate::db::test_support::{seed_account, seed_repository, seed_target, test_db};
 
     async fn seeded(db: &Database) -> (i64, i64, i64) {
         let account_id = seed_account(db).await;
-        let installation_id = seed_installation(db, account_id).await;
-        let repo_id = seed_repository(db, installation_id).await;
+        let repo_id = seed_repository(db, account_id).await;
         let target_id = seed_target(db).await;
         (account_id, repo_id, target_id)
     }

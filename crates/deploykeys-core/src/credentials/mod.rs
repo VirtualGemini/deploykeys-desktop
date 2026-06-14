@@ -1,6 +1,8 @@
 use crate::Result;
 use keyring::Entry;
 
+pub mod file_store;
+
 /// Manages secure credential storage using the system keyring
 ///
 /// Credentials are stored in:

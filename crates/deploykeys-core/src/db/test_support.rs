@@ -1,12 +1,9 @@
 //! Shared fixtures for database-backed tests: a migrated temp database and
 //! seed rows satisfying the foreign-key chain
-//! account -> installation -> repository / target -> key_binding.
+//! account -> repository / target -> key_binding.
 
 use super::Database;
-use crate::models::{
-    Account, AccountType, AuthType, GitHubInstallation, OsType, Repository, RepositorySelection,
-    Target, TargetStatus, TargetType,
-};
+use crate::models::{Account, AuthType, OsType, Repository, Target, TargetStatus, TargetType};
 use chrono::Utc;
 use tempfile::TempDir;
 
@@ -29,7 +26,7 @@ pub(crate) async fn seed_account(db: &Database) -> i64 {
         github_user_id: 4242,
         login: "seeded".to_string(),
         avatar_url: None,
-        auth_type: AuthType::GitHubAppDeviceFlow,
+        auth_type: AuthType::PersonalAccessToken,
         token_ref: "github_token_seeded".to_string(),
         refresh_token_ref: None,
         token_expires_at: None,
@@ -39,29 +36,12 @@ pub(crate) async fn seed_account(db: &Database) -> i64 {
     db.accounts().create(&account).await.expect("seed account")
 }
 
-pub(crate) async fn seed_installation(db: &Database, account_id: i64) -> i64 {
-    let installation = GitHubInstallation {
-        id: 0,
-        github_installation_id: 9001,
-        account_id,
-        account_owner: "owner".to_string(),
-        account_type: AccountType::User,
-        permissions_snapshot: None,
-        repository_selection: RepositorySelection::All,
-        last_synced_at: None,
-    };
-    db.installations()
-        .create(&installation)
-        .await
-        .expect("seed installation")
-}
-
-/// Insert repository `owner/repo` under the given installation.
-pub(crate) async fn seed_repository(db: &Database, installation_id: i64) -> i64 {
+/// Insert repository `owner/repo` owned by the given account.
+pub(crate) async fn seed_repository(db: &Database, account_id: i64) -> i64 {
     let repo = Repository {
         id: 0,
         github_repo_id: 1337,
-        installation_id,
+        account_id,
         owner: "owner".to_string(),
         name: "repo".to_string(),
         full_name: "owner/repo".to_string(),
@@ -70,6 +50,7 @@ pub(crate) async fn seed_repository(db: &Database, installation_id: i64) -> i64 
         default_branch: Some("main".to_string()),
         ssh_url: "git@github.com:owner/repo.git".to_string(),
         html_url: "https://github.com/owner/repo".to_string(),
+        language: Some("Rust".to_string()),
         permissions_snapshot: None,
         last_synced_at: None,
     };

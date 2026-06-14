@@ -67,18 +67,6 @@ fn auth_type_roundtrip() {
 }
 
 #[test]
-fn account_type_roundtrip() {
-    assert_roundtrip(&[AccountType::User, AccountType::Organization]);
-    assert!(AccountType::from_str("bot").is_err());
-}
-
-#[test]
-fn repository_selection_roundtrip() {
-    assert_roundtrip(&[RepositorySelection::All, RepositorySelection::Selected]);
-    assert!(RepositorySelection::from_str("some").is_err());
-}
-
-#[test]
 fn target_type_roundtrip() {
     assert_roundtrip(&[TargetType::Local, TargetType::Remote]);
     assert!(TargetType::from_str("container").is_err());

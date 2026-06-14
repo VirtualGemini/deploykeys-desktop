@@ -61,3 +61,33 @@
     }
   }
 }
+
+@layer utilities {
+  /* The single header progress line. Width is driven inline by the component
+     (aggregate percent while running, 100 % while completing); opacity is
+     toggled via the `opacity-0` utility so the bar fades only after it has
+     filled to the end. Width and opacity get distinct durations so the climb
+     stays snappy while the fade is gentle. The hold/fade timers in
+     src/progress.rs are tuned to outlast these transitions. */
+  .header-progress-bar {
+    transition: width 200ms ease-out, opacity 300ms ease-out;
+    box-shadow: 0 0 10px color-mix(in oklab, var(--color-primary) 45%, transparent);
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .header-progress-bar {
+      transition: none;
+    }
+  }
+
+  .sign-in-hint-soften {
+    filter: blur(3.5px) brightness(0.68) contrast(1.22) saturate(1.18);
+    opacity: 0.42;
+  }
+
+  .sign-in-button-hover {
+    color: var(--color-primary);
+    filter: brightness(1.24) contrast(1.16) saturate(1.18)
+      drop-shadow(0 10px 18px color-mix(in oklab, var(--color-primary) 28%, transparent));
+  }
+}

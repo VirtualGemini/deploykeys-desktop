@@ -1,48 +1,27 @@
 //! Cross-repository integration tests exercising the full foreign-key chain.
 
-use crate::db::test_support::{
-    seed_account, seed_installation, seed_repository, seed_target, test_db,
-};
+use crate::db::test_support::{seed_account, seed_repository, seed_target, test_db};
 use crate::models::{
     DeployKeyPermission, KeyAlgorithm, KeyBinding, KeyBindingStatus, KeyResidency,
 };
 use chrono::Utc;
 
 #[tokio::test]
-async fn installation_chain_is_queryable() {
+async fn repository_chain_is_queryable() {
     let (_dir, db) = test_db().await;
     let account_id = seed_account(&db).await;
-    let installation_id = seed_installation(&db, account_id).await;
-    let repo_id = seed_repository(&db, installation_id).await;
+    let repo_id = seed_repository(&db, account_id).await;
 
-    let installation = db
-        .installations()
-        .find_by_id(installation_id)
-        .await
-        .unwrap()
-        .unwrap();
-    assert_eq!(installation.account_id, account_id);
-
-    let by_github_id = db
-        .installations()
-        .find_by_github_installation_id(9001)
-        .await
-        .unwrap()
-        .unwrap();
-    assert_eq!(by_github_id.id, installation_id);
-
-    let installations = db
-        .installations()
-        .list_by_account(account_id)
-        .await
-        .unwrap();
-    assert_eq!(installations.len(), 1);
-
-    let repos = db
+    let repo = db
         .repositories()
-        .list_by_installation(installation_id)
+        .find_by_github_repo_id(1337)
         .await
+        .unwrap()
         .unwrap();
+    assert_eq!(repo.id, repo_id);
+    assert_eq!(repo.account_id, account_id);
+
+    let repos = db.repositories().list_by_account(account_id).await.unwrap();
     assert_eq!(repos.len(), 1);
     assert_eq!(repos[0].id, repo_id);
     assert_eq!(repos[0].full_name, "owner/repo");
@@ -54,8 +33,7 @@ async fn installation_chain_is_queryable() {
 async fn repository_lookup_by_github_id_and_sync_time() {
     let (_dir, db) = test_db().await;
     let account_id = seed_account(&db).await;
-    let installation_id = seed_installation(&db, account_id).await;
-    let repo_id = seed_repository(&db, installation_id).await;
+    let repo_id = seed_repository(&db, account_id).await;
 
     let repo = db
         .repositories()
@@ -81,8 +59,7 @@ async fn repository_lookup_by_github_id_and_sync_time() {
 async fn key_binding_listing_and_update_flow() {
     let (_dir, db) = test_db().await;
     let account_id = seed_account(&db).await;
-    let installation_id = seed_installation(&db, account_id).await;
-    let repo_id = seed_repository(&db, installation_id).await;
+    let repo_id = seed_repository(&db, account_id).await;
     let target_id = seed_target(&db).await;
 
     let binding = KeyBinding {

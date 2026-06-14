@@ -13,27 +13,6 @@ pub struct Account {
     pub avatar_url: Option<String>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
-pub struct DeviceCode {
-    pub device_code: String,
-    pub user_code: String,
-    pub verification_uri: String,
-    /// Minimum seconds between polls.
-    pub interval: u64,
-    /// Seconds until the device code expires.
-    #[allow(dead_code)]
-    pub expires_in: u64,
-}
-
-/// Outcome of a single token poll. Mirrors the backend `PollDto` tagged enum.
-#[derive(Debug, Clone, Deserialize)]
-#[serde(tag = "status", rename_all = "snake_case")]
-pub enum Poll {
-    Pending,
-    SlowDown,
-    Authorized { account: Account },
-}
-
 /// Returns the persisted session account, if the user is already signed in.
 pub async fn get_session() -> Result<Option<Account>, String> {
     invoke_no_args("get_session").await
@@ -43,9 +22,6 @@ pub async fn get_language() -> Result<Option<String>, String> {
     invoke_no_args("get_language").await
 }
 
-/// Reserved for a future settings screen; the language currently follows the
-/// persisted preference with no in-app picker yet.
-#[allow(dead_code)]
 pub async fn set_language(code: &str) -> Result<(), String> {
     #[derive(Serialize)]
     struct Args<'a> {
@@ -54,17 +30,25 @@ pub async fn set_language(code: &str) -> Result<(), String> {
     invoke("set_language", &Args { code }).await
 }
 
-pub async fn start_github_auth() -> Result<DeviceCode, String> {
-    invoke_no_args("start_github_auth").await
+pub async fn get_page_size() -> Result<Option<usize>, String> {
+    invoke_no_args("get_page_size").await
 }
 
-pub async fn poll_github_auth(device_code: &str) -> Result<Poll, String> {
+pub async fn set_page_size(size: usize) -> Result<(), String> {
+    #[derive(Serialize)]
+    struct Args {
+        size: usize,
+    }
+    invoke("set_page_size", &Args { size }).await
+}
+
+/// Sign in with a Personal Access Token; returns the account on success.
+pub async fn sign_in_with_token(token: &str) -> Result<Account, String> {
     #[derive(Serialize)]
     struct Args<'a> {
-        #[serde(rename = "deviceCode")]
-        device_code: &'a str,
+        token: &'a str,
     }
-    invoke("poll_github_auth", &Args { device_code }).await
+    invoke("sign_in_with_token", &Args { token }).await
 }
 
 pub async fn open_url(url: &str) -> Result<(), String> {
@@ -73,4 +57,40 @@ pub async fn open_url(url: &str) -> Result<(), String> {
         url: &'a str,
     }
     invoke("open_url", &Args { url }).await
+}
+
+/// Clear the persisted session on the backend (account row + keyring token).
+pub async fn sign_out() -> Result<(), String> {
+    invoke_no_args("sign_out").await
+}
+
+/// A repository as shown in the Repos list. Mirrors the backend `RepoDto`.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+pub struct Repo {
+    pub full_name: String,
+    pub owner: String,
+    pub name: String,
+    pub private: bool,
+    pub archived: bool,
+    pub language: Option<String>,
+    pub default_branch: Option<String>,
+    pub html_url: String,
+    pub ssh_url: String,
+}
+
+/// Count returned by `sync_repositories`. Mirrors the backend `SyncSummaryDto`.
+#[derive(Debug, Clone, Copy, Deserialize)]
+pub struct RepoSyncResult {
+    #[allow(dead_code)]
+    pub repositories: usize,
+}
+
+/// Read the locally-synced repositories (no network).
+pub async fn list_repositories() -> Result<Vec<Repo>, String> {
+    invoke_no_args("list_repositories").await
+}
+
+/// Refresh repositories from GitHub for the active account, then persist them.
+pub async fn sync_repositories() -> Result<RepoSyncResult, String> {
+    invoke_no_args("sync_repositories").await
 }

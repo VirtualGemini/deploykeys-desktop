@@ -12,7 +12,7 @@ pub struct RepositoryRepository {
 struct RepositoryRow {
     id: i64,
     github_repo_id: i64,
-    installation_id: i64,
+    account_id: i64,
     owner: String,
     name: String,
     full_name: String,
@@ -21,6 +21,7 @@ struct RepositoryRow {
     default_branch: Option<String>,
     ssh_url: String,
     html_url: String,
+    language: Option<String>,
     permissions_snapshot: Option<String>,
     last_synced_at: Option<i64>,
 }
@@ -32,7 +33,7 @@ impl TryFrom<RepositoryRow> for Repository {
         Ok(Repository {
             id: r.id,
             github_repo_id: r.github_repo_id,
-            installation_id: r.installation_id,
+            account_id: r.account_id,
             owner: r.owner,
             name: r.name,
             full_name: r.full_name,
@@ -41,6 +42,7 @@ impl TryFrom<RepositoryRow> for Repository {
             default_branch: r.default_branch,
             ssh_url: r.ssh_url,
             html_url: r.html_url,
+            language: r.language,
             permissions_snapshot: r.permissions_snapshot,
             last_synced_at: optional_timestamp(r.last_synced_at),
         })
@@ -60,13 +62,13 @@ impl RepositoryRepository {
         let result = sqlx::query!(
             r#"
             INSERT INTO repositories (
-                github_repo_id, installation_id, owner, name, full_name,
+                github_repo_id, account_id, owner, name, full_name,
                 private, archived, default_branch, ssh_url, html_url,
-                permissions_snapshot, last_synced_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                language, permissions_snapshot, last_synced_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             "#,
             repo.github_repo_id,
-            repo.installation_id,
+            repo.account_id,
             repo.owner,
             repo.name,
             repo.full_name,
@@ -75,6 +77,7 @@ impl RepositoryRepository {
             repo.default_branch,
             repo.ssh_url,
             repo.html_url,
+            repo.language,
             repo.permissions_snapshot,
             last_synced_at
         )
@@ -84,13 +87,48 @@ impl RepositoryRepository {
         Ok(result.last_insert_rowid())
     }
 
+    /// Update the mutable fields of an existing repository, matched by its
+    /// GitHub repo id, and refresh `last_synced_at` to now.
+    pub async fn update(&self, repo: &Repository) -> Result<()> {
+        let private = repo.private as i64;
+        let archived = repo.archived as i64;
+        let now = Utc::now().timestamp();
+
+        sqlx::query!(
+            r#"
+            UPDATE repositories SET
+                account_id = ?, owner = ?, name = ?, full_name = ?,
+                private = ?, archived = ?, default_branch = ?, ssh_url = ?,
+                html_url = ?, language = ?, permissions_snapshot = ?, last_synced_at = ?
+            WHERE github_repo_id = ?
+            "#,
+            repo.account_id,
+            repo.owner,
+            repo.name,
+            repo.full_name,
+            private,
+            archived,
+            repo.default_branch,
+            repo.ssh_url,
+            repo.html_url,
+            repo.language,
+            repo.permissions_snapshot,
+            now,
+            repo.github_repo_id,
+        )
+        .execute(&self.pool)
+        .await?;
+
+        Ok(())
+    }
+
     pub async fn find_by_id(&self, id: i64) -> Result<Option<Repository>> {
         let row = sqlx::query_as!(
             RepositoryRow,
             r#"
-            SELECT id as "id!", github_repo_id, installation_id, owner, name, full_name,
+            SELECT id as "id!", github_repo_id, account_id, owner, name, full_name,
                    private as "private: bool", archived as "archived: bool",
-                   default_branch, ssh_url, html_url, permissions_snapshot, last_synced_at
+                   default_branch, ssh_url, html_url, language, permissions_snapshot, last_synced_at
             FROM repositories WHERE id = ?
             "#,
             id
@@ -105,9 +143,9 @@ impl RepositoryRepository {
         let row = sqlx::query_as!(
             RepositoryRow,
             r#"
-            SELECT id as "id!", github_repo_id, installation_id, owner, name, full_name,
+            SELECT id as "id!", github_repo_id, account_id, owner, name, full_name,
                    private as "private: bool", archived as "archived: bool",
-                   default_branch, ssh_url, html_url, permissions_snapshot, last_synced_at
+                   default_branch, ssh_url, html_url, language, permissions_snapshot, last_synced_at
             FROM repositories WHERE github_repo_id = ?
             "#,
             github_repo_id
@@ -118,16 +156,16 @@ impl RepositoryRepository {
         row.map(Repository::try_from).transpose()
     }
 
-    pub async fn list_by_installation(&self, installation_id: i64) -> Result<Vec<Repository>> {
+    pub async fn list_by_account(&self, account_id: i64) -> Result<Vec<Repository>> {
         let rows = sqlx::query_as!(
             RepositoryRow,
             r#"
-            SELECT id as "id!", github_repo_id, installation_id, owner, name, full_name,
+            SELECT id as "id!", github_repo_id, account_id, owner, name, full_name,
                    private as "private: bool", archived as "archived: bool",
-                   default_branch, ssh_url, html_url, permissions_snapshot, last_synced_at
-            FROM repositories WHERE installation_id = ? ORDER BY full_name ASC
+                   default_branch, ssh_url, html_url, language, permissions_snapshot, last_synced_at
+            FROM repositories WHERE account_id = ? ORDER BY full_name ASC
             "#,
-            installation_id
+            account_id
         )
         .fetch_all(&self.pool)
         .await?;
@@ -139,9 +177,9 @@ impl RepositoryRepository {
         let rows = sqlx::query_as!(
             RepositoryRow,
             r#"
-            SELECT id as "id!", github_repo_id, installation_id, owner, name, full_name,
+            SELECT id as "id!", github_repo_id, account_id, owner, name, full_name,
                    private as "private: bool", archived as "archived: bool",
-                   default_branch, ssh_url, html_url, permissions_snapshot, last_synced_at
+                   default_branch, ssh_url, html_url, language, permissions_snapshot, last_synced_at
             FROM repositories ORDER BY full_name ASC
             "#
         )

@@ -2,6 +2,8 @@ mod api;
 mod app;
 mod i18n;
 mod icons;
+mod page_size;
+mod progress;
 mod screens;
 mod tauri;
 mod theme;

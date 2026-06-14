@@ -5,7 +5,6 @@ use std::path::Path;
 use std::str::FromStr;
 
 pub mod account_repository;
-pub mod github_installation_repository;
 pub mod key_binding_repository;
 pub mod repository_repository;
 pub mod target_repository;
@@ -17,7 +16,6 @@ pub(crate) mod test_support;
 mod tests;
 
 pub use account_repository::AccountRepository;
-pub use github_installation_repository::GitHubInstallationRepository;
 pub use key_binding_repository::KeyBindingRepository;
 pub use repository_repository::RepositoryRepository;
 pub use target_repository::TargetRepository;
@@ -68,11 +66,6 @@ impl Database {
     /// Get account repository
     pub fn accounts(&self) -> AccountRepository {
         AccountRepository::new(self.pool.clone())
-    }
-
-    /// Get GitHub installations repository
-    pub fn installations(&self) -> GitHubInstallationRepository {
-        GitHubInstallationRepository::new(self.pool.clone())
     }
 
     /// Get repositories repository

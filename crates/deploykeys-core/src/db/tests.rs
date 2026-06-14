@@ -1,6 +1,4 @@
-use crate::db::test_support::{
-    seed_account, seed_installation, seed_repository, seed_target, test_db,
-};
+use crate::db::test_support::{seed_account, seed_repository, seed_target, test_db};
 use crate::db::Database;
 use crate::models::{
     DeployKeyPermission, KeyAlgorithm, KeyBinding, KeyBindingStatus, KeyResidency,
@@ -134,8 +132,7 @@ fn sample_binding(repo_id: i64, target_id: i64) -> KeyBinding {
 async fn key_binding_unique_constraint_is_enforced() {
     let (_dir, db) = test_db().await;
     let account_id = seed_account(&db).await;
-    let installation_id = seed_installation(&db, account_id).await;
-    let repo_id = seed_repository(&db, installation_id).await;
+    let repo_id = seed_repository(&db, account_id).await;
     let target_id = seed_target(&db).await;
 
     let binding = sample_binding(repo_id, target_id);
@@ -161,8 +158,7 @@ async fn key_binding_requires_existing_repo_and_target() {
 async fn deleting_repository_cascades_to_bindings() {
     let (_dir, db) = test_db().await;
     let account_id = seed_account(&db).await;
-    let installation_id = seed_installation(&db, account_id).await;
-    let repo_id = seed_repository(&db, installation_id).await;
+    let repo_id = seed_repository(&db, account_id).await;
     let target_id = seed_target(&db).await;
 
     let binding_id = db
@@ -181,8 +177,7 @@ async fn deleting_repository_cascades_to_bindings() {
 async fn update_status_stamps_verification_time() {
     let (_dir, db) = test_db().await;
     let account_id = seed_account(&db).await;
-    let installation_id = seed_installation(&db, account_id).await;
-    let repo_id = seed_repository(&db, installation_id).await;
+    let repo_id = seed_repository(&db, account_id).await;
     let target_id = seed_target(&db).await;
 
     let binding_id = db
@@ -204,4 +199,46 @@ async fn update_status_stamps_verification_time() {
         .unwrap();
     assert_eq!(updated.status, KeyBindingStatus::Drifted);
     assert!(updated.last_verified_at.is_some());
+}
+
+#[tokio::test]
+async fn repository_update_changes_fields_in_place() {
+    use crate::models::Repository;
+
+    let (_dir, db) = test_db().await;
+    let account_id = seed_account(&db).await;
+    seed_repository(&db, account_id).await; // github_repo_id = 1337
+
+    let existing = db
+        .repositories()
+        .find_by_github_repo_id(1337)
+        .await
+        .unwrap()
+        .unwrap();
+
+    let updated = Repository {
+        name: "renamed".to_string(),
+        full_name: "owner/renamed".to_string(),
+        archived: true,
+        default_branch: Some("trunk".to_string()),
+        permissions_snapshot: Some(r#"{"admin":true}"#.to_string()),
+        ..existing.clone()
+    };
+    db.repositories().update(&updated).await.unwrap();
+
+    let reloaded = db
+        .repositories()
+        .find_by_github_repo_id(1337)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(reloaded.id, existing.id, "update must not create a new row");
+    assert_eq!(reloaded.name, "renamed");
+    assert_eq!(reloaded.full_name, "owner/renamed");
+    assert!(reloaded.archived);
+    assert_eq!(reloaded.default_branch.as_deref(), Some("trunk"));
+    assert!(reloaded.last_synced_at.is_some());
+
+    let all = db.repositories().list_all().await.unwrap();
+    assert_eq!(all.len(), 1, "still exactly one repository row");
 }

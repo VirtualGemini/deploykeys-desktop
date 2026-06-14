@@ -1,10 +1,14 @@
 //! Root component: owns screen state, bootstraps the persisted session, and
-//! drives the GitHub device flow (request code, then poll on an interval).
+//! drives Personal Access Token sign-in.
 
 use crate::api;
 use crate::i18n::{self, t, Locale};
 use crate::icons::{Icon, IconName};
-use crate::screens::oauth::OAuth;
+use crate::page_size::{self, DEFAULT_PAGE_SIZE};
+use crate::progress::ProgressHandle;
+use crate::screens::repos::Repos;
+use crate::screens::signin::SignIn;
+use crate::tauri;
 use crate::theme::{self, Theme};
 use leptos::*;
 use wasm_bindgen_futures::spawn_local;
@@ -12,20 +16,54 @@ use wasm_bindgen_futures::spawn_local;
 #[derive(Clone, PartialEq)]
 enum Screen {
     Main,
-    OAuth {
-        user_code: String,
-        verification_uri: String,
-    },
+    SignIn,
 }
 
-/// A pending device-flow session: the code to poll with and the cadence.
-#[derive(Clone)]
-struct AuthSession {
-    device_code: String,
-    interval_secs: u64,
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum AppSection {
+    Repos,
+    Connect,
+    Keys,
+}
+
+const APP_SECTIONS: &[AppSection] = &[AppSection::Repos, AppSection::Connect, AppSection::Keys];
+
+impl AppSection {
+    const fn label_key(self) -> &'static str {
+        match self {
+            AppSection::Repos => "nav.repos",
+            AppSection::Connect => "nav.connect",
+            AppSection::Keys => "nav.keys",
+        }
+    }
+
+    const fn icon(self) -> IconName {
+        match self {
+            AppSection::Repos => IconName::Folder,
+            AppSection::Connect => IconName::Server,
+            AppSection::Keys => IconName::Key,
+        }
+    }
 }
 
 const SIDEBAR_AUTO_COLLAPSE_WIDTH: f64 = 840.0;
+const GITHUB_REPOSITORY_URL: &str = match option_env!("DEPLOYKEYS_GITHUB_REPOSITORY_URL") {
+    Some(url) => url,
+    None => "https://github.com/VirtualGemini/deploykeys-desktop",
+};
+const FEEDBACK_URL: &str = match option_env!("DEPLOYKEYS_FEEDBACK_URL") {
+    Some(url) => url,
+    None => "https://github.com/VirtualGemini/deploykeys-desktop/issues/new",
+};
+const SUPPORT_URL: &str = match option_env!("DEPLOYKEYS_SUPPORT_URL") {
+    Some(url) => url,
+    None => "https://github.com/VirtualGemini/deploykeys-desktop/discussions",
+};
+
+/// A command-palette entry before filtering: (i18n key, icon, action).
+type PaletteCommand = (&'static str, IconName, Box<dyn Fn()>);
+/// A filtered palette entry ready to render: (display label, optional icon, action).
+type FilteredCommand = (String, Option<IconName>, Box<dyn Fn()>);
 
 #[component]
 pub fn App() -> impl IntoView {
@@ -34,13 +72,32 @@ pub fn App() -> impl IntoView {
     // startup locale guess comes from the webview language; the persisted
     // preference (if any) overrides it once the session bootstrap below runs.
     // Theme defaults to System (follows the OS prefers-color-scheme).
+    // Progress handle is also provided at root so the header bar can react to
+    // backend progress events and simulated short operations.
     i18n::provide_locale(detect_locale());
     theme::provide_theme(Theme::System);
+    page_size::provide_page_size(DEFAULT_PAGE_SIZE);
 
     let screen = RwSignal::new(Screen::Main);
     let signing_in = RwSignal::new(false);
+    let pending_count = RwSignal::new(0_usize);
+    let progress = ProgressHandle::new();
+    progress.provide();
+    let progress_for_listener = progress;
     let error = RwSignal::new(None::<String>);
     let account = RwSignal::new(None::<api::Account>);
+    let current_section = RwSignal::new(AppSection::Repos);
+    // When true, the page dims/blurs and the sidebar sign-in button takes on
+    // its hover emphasis (a 3s gentle hint shown when a signed-out user clicks Sync).
+    let prompt_sign_in = RwSignal::new(false);
+
+    // Start listening to backend progress events as soon as the app mounts.
+    // Events carry `operation` and `percent`; we keep them in the shared handle.
+    spawn_local(async move {
+        let _ = tauri::listen_progress(move |ev| {
+            progress_for_listener.on_real_progress(ev.operation, ev.percent);
+        });
+    });
 
     // Sidebar state: lifted to App level so it persists across screen changes
     let manual_sidebar_collapsed = RwSignal::new(None::<bool>);
@@ -68,43 +125,46 @@ pub fn App() -> impl IntoView {
     // the main screen; a found session just populates the account (showing the
     // signed-in identity), it no longer gates which screen is shown.
     spawn_local(async move {
+        let sim = progress.begin_simulated();
         if let Ok(Some(code)) = api::get_language().await {
             i18n::locale().set(Locale::from_code(&code));
+        }
+        if let Ok(Some(size)) = api::get_page_size().await {
+            if let Some(valid) = page_size::validate_page_size(size) {
+                page_size::page_size().set(valid);
+            }
         }
         if let Ok(Some(acct)) = api::get_session().await {
             account.set(Some(acct));
         }
+        progress.end_simulated(&sim);
     });
 
+    // Open the token-paste sign-in screen.
     let start_auth = move |_| {
-        if signing_in.get() {
+        error.set(None);
+        screen.set(Screen::SignIn);
+    };
+
+    // Submit a pasted Personal Access Token: validate + persist on the backend.
+    let submit_token = move |token: String| {
+        if signing_in.get_untracked() || token.trim().is_empty() {
             return;
         }
         signing_in.set(true);
+        let _sim = progress.begin_simulated();
         error.set(None);
         spawn_local(async move {
-            match api::start_github_auth().await {
-                Ok(code) => {
-                    screen.set(Screen::OAuth {
-                        user_code: code.user_code.clone(),
-                        verification_uri: code.verification_uri.clone(),
-                    });
-                    signing_in.set(false);
-                    poll_loop(
-                        AuthSession {
-                            device_code: code.device_code,
-                            interval_secs: code.interval.max(1),
-                        },
-                        screen,
-                        error,
-                        account,
-                    );
+            match api::sign_in_with_token(token.trim()).await {
+                Ok(acct) => {
+                    account.set(Some(acct));
+                    screen.set(Screen::Main);
                 }
-                Err(e) => {
-                    error.set(Some(e));
-                    signing_in.set(false);
-                }
+                Err(e) => error.set(Some(e)),
             }
+            signing_in.set(false);
+            // The real progress stream from the backend ends at 100; no need to
+            // keep an extra simulated entry alive.
         });
     };
 
@@ -115,13 +175,24 @@ pub fn App() -> impl IntoView {
     };
 
     let open_url = move |url: String| {
+        let sim = progress.begin_simulated();
         spawn_local(async move {
             let _ = api::open_url(&url).await;
+            progress.end_simulated(&sim);
         });
     };
 
-    let copy = move |text: String| {
-        copy_to_clipboard(&text);
+    // Signed-out Sync: visually nudge the sidebar sign-in button for 3s rather
+    // than erroring. Re-arming while already showing just resets nothing (no-op).
+    let hint_sign_in = move |_| {
+        if prompt_sign_in.get_untracked() {
+            return;
+        }
+        prompt_sign_in.set(true);
+        set_timeout(
+            move || prompt_sign_in.set(false),
+            std::time::Duration::from_secs(3),
+        );
     };
 
     view! {
@@ -130,85 +201,86 @@ pub fn App() -> impl IntoView {
                 <Main
                     account=account
                     signing_in=signing_in
-                    error=error
+                    pending_count=pending_count
+                    progress=progress
                     on_sign_in=Callback::new(start_auth)
+                    on_sign_in_hint=Callback::new(hint_sign_in)
+                    prompt_sign_in=prompt_sign_in
                     sidebar_collapsed=sidebar_collapsed
                     sidebar_toggle=sidebar_toggle_callback
+                    current_section=current_section
                 />
             }.into_view(),
-            Screen::OAuth { user_code, verification_uri } => view! {
-                <OAuth
-                    user_code=user_code
-                    verification_uri=verification_uri
-                    on_open=Callback::new(open_url)
-                    on_copy=Callback::new(copy)
-                    on_cancel=Callback::new(cancel_auth)
-                />
+            Screen::SignIn => view! {
+                <div class="relative min-h-screen bg-bg">
+                    <div class="absolute inset-x-0 top-0 z-50">
+                        <HeaderLoading progress=progress />
+                    </div>
+                    <SignIn
+                        signing_in=signing_in
+                        error=error
+                        on_submit=Callback::new(submit_token)
+                        on_open=Callback::new(open_url)
+                        on_cancel=Callback::new(cancel_auth)
+                    />
+                </div>
             }.into_view(),
         }}
     }
 }
 
-/// Schedule one poll after `interval_secs`, handling each outcome and
-/// re-scheduling until the flow terminates. The screen signal guards against a
-/// cancelled flow resurrecting itself: if the user left the OAuth screen, the
-/// loop stops.
-fn poll_loop(
-    session: AuthSession,
-    screen: RwSignal<Screen>,
-    error: RwSignal<Option<String>>,
-    account: RwSignal<Option<api::Account>>,
-) {
-    spawn_local(async move {
-        sleep_secs(session.interval_secs).await;
-
-        // Bail if the user navigated away (cancelled) while we were waiting.
-        if !matches!(screen.get_untracked(), Screen::OAuth { .. }) {
-            return;
-        }
-
-        match api::poll_github_auth(&session.device_code).await {
-            Ok(api::Poll::Pending) => poll_loop(session, screen, error, account),
-            Ok(api::Poll::SlowDown) => {
-                let next = AuthSession {
-                    interval_secs: session.interval_secs + 5,
-                    ..session
-                };
-                poll_loop(next, screen, error, account)
-            }
-            Ok(api::Poll::Authorized { account: acct }) => {
-                account.set(Some(acct));
-                screen.set(Screen::Main);
-            }
-            Err(e) => {
-                error.set(Some(e));
-                screen.set(Screen::Main);
-            }
-        }
-    });
+#[component]
+fn HeaderLoading(progress: ProgressHandle) -> impl IntoView {
+    let width = progress.bar_width();
+    let opaque = progress.bar_opaque();
+    let visible = progress.bar_visible();
+    view! {
+        <div class="relative shrink-0 h-px bg-border overflow-hidden" aria-hidden="true">
+            <Show when=move || visible.get()>
+                <div
+                    class="header-progress-bar absolute inset-y-0 left-0 bg-primary"
+                    style:opacity=move || if opaque.get() { "1" } else { "0" }
+                    style:width=move || format!("{}%", width.get())
+                ></div>
+            </Show>
+        </div>
+    }
 }
 
-/// The main app screen (repos / connect / keys / forge), with a top nav. The
+/// The main app screen (repos / connect / keys), with a top nav. The
 /// top-right corner shows the signed-in identity + sign out when authenticated,
-/// or a "sign in with GitHub" button that starts the device flow otherwise.
+/// or a "sign in with GitHub" button that opens token sign-in otherwise.
 #[component]
 fn Main(
     account: RwSignal<Option<api::Account>>,
     #[prop(into)] signing_in: Signal<bool>,
-    #[prop(into)] error: Signal<Option<String>>,
+    #[allow(unused_variables)] pending_count: RwSignal<usize>,
+    progress: ProgressHandle,
     on_sign_in: Callback<()>,
+    on_sign_in_hint: Callback<()>,
+    #[prop(into)] prompt_sign_in: Signal<bool>,
     #[prop(into)] sidebar_collapsed: Signal<bool>,
     sidebar_toggle: Callback<()>,
+    current_section: RwSignal<AppSection>,
 ) -> impl IntoView {
     let sign_out = move |_| {
-        // No backend sign-out command yet; just drop local state.
-        account.set(None);
+        // Clear the persisted session on the backend, then drop local state.
+        // Without the backend call the account row + keyring token survive, so
+        // the session would reappear on the next launch.
+        let sim = progress.begin_simulated();
+        spawn_local(async move {
+            let _ = api::sign_out().await;
+            account.set(None);
+            progress.end_simulated(&sim);
+        });
     };
 
     // Command palette open state (toggled by ⌘K / Ctrl+K, or clicking the
     // header trigger). When open, a full-screen modal overlay with a centered
     // search box + filtered action list appears.
     let palette_open = RwSignal::new(false);
+
+    let mouse_in_sidebar = RwSignal::new(false);
 
     view! {
         // Standard web-admin layout: a top title bar, then a body row split into
@@ -230,7 +302,7 @@ fn Main(
             // events and stay clickable.
             <header
                 data-tauri-drag-region=""
-                class="flex items-center shrink-0 h-14 pl-20 pr-4 gap-3 bg-surface border-b border-border select-none"
+                class="flex items-center shrink-0 h-14 pl-20 pr-4 gap-3 bg-surface select-none"
             >
                 // Brand: mark + product name, right next to the traffic lights.
                 <div class="flex items-center gap-2.5 pointer-events-none">
@@ -246,16 +318,22 @@ fn Main(
                 // fall back to text selection instead of moving the window.
                 <div data-tauri-drag-region="" class="flex-1 self-stretch"></div>
 
-                // Right: search box + language toggle + theme toggle. Sizing and
-                // shape follow Preline's search-trigger and icon-button specs; the
-                // interactions are wired to our own i18n/theme signals.
-                <CommandPaletteTrigger on_open=Callback::new(move |_| palette_open.set(true)) />
-                <LanguageToggle />
-                <ThemeToggle />
+                // Right: search sits slightly apart from compact utility buttons.
+                <div class="flex items-center gap-3">
+                    <CommandPaletteTrigger on_open=Callback::new(move |_| palette_open.set(true)) />
+                    <div class="flex items-center gap-1">
+                        <LanguageToggle progress=progress pending_count=pending_count />
+                        <ThemeToggle />
+                        <QuickRoutesMenu current_section=current_section pending_count=pending_count progress=progress />
+                        <PlaceholderSettingsButton />
+                    </div>
+                </div>
             </header>
 
+            <HeaderLoading progress=progress />
+
             // Command palette modal (shown when palette_open is true).
-            <CommandPalette open=palette_open />
+            <CommandPalette open=palette_open pending_count=pending_count progress=progress />
 
             // Body: sidebar (left) + content (right).
             <div class="flex-1 flex min-h-0">
@@ -267,12 +345,29 @@ fn Main(
                     } else {
                         "shrink-0 w-[210px] bg-surface flex flex-col overflow-y-auto overflow-x-hidden transition-[width] duration-300 [transition-timing-function:cubic-bezier(0.22,1,0.36,1)]"
                     }
-                }>
-                    <nav class="flex flex-col gap-1 py-3 pl-2 pr-1">
-                        <NavItem icon=IconName::Folder label=move || t("nav.repos") active=true collapsed=sidebar_collapsed />
-                        <NavItem icon=IconName::Server label=move || t("nav.connect") active=false collapsed=sidebar_collapsed />
-                        <NavItem icon=IconName::Key label=move || t("nav.keys") active=false collapsed=sidebar_collapsed />
-                        <NavItem icon=IconName::Key label=move || t("nav.forge") active=false collapsed=sidebar_collapsed />
+                }
+                    on:mouseenter=move |_| mouse_in_sidebar.set(true)
+                    on:mouseleave=move |_| mouse_in_sidebar.set(false)
+                >
+                    <nav class=move || {
+                        let base = "flex flex-col gap-1 py-3 pl-2 pr-1 transition-all duration-700";
+                        if prompt_sign_in.get() {
+                            format!("{base} sign-in-hint-soften pointer-events-none")
+                        } else {
+                            base.to_string()
+                        }
+                    }>
+                        {APP_SECTIONS.iter().copied().map(|section| {
+                            view! {
+                                <NavItem
+                                    icon=section.icon()
+                                    label=move || t(section.label_key())
+                                    active=Signal::derive(move || current_section.get() == section)
+                                    collapsed=sidebar_collapsed
+                                    on_select=Callback::new(move |_| current_section.set(section))
+                                />
+                            }
+                        }).collect_view()}
                     </nav>
 
                     // Spacer pushes the account block to the bottom.
@@ -330,20 +425,21 @@ fn Main(
                                 // Not signed in: show GitHub icon when collapsed, ghost button when expanded
                                 // Use two separate components with fade in/out for smooth transition
                                 view! {
-                                    <div class="pr-[7px] relative">
+                                    <div class="pr-[7px] relative rounded-lg">
                                         // Collapsed: icon only button
                                         <button
                                             type="button"
                                             title=move || t("welcome.sign_in")
                                             class=move || {
+                                                let hinted = if prompt_sign_in.get() { " sign-in-button-hover" } else { "" };
                                                 if sidebar_collapsed.get() {
                                                     if signing_in.get() {
-                                                        "absolute inset-0 flex items-center justify-center h-10 rounded-lg text-content hover:bg-bg focus:outline-none transition-opacity duration-300 ease-out delay-150 opacity-50 pointer-events-none"
+                                                        format!("absolute inset-0 flex items-center justify-center h-10 rounded-lg text-content hover:text-primary focus:outline-none transition-all duration-700 ease-out delay-150 opacity-50 pointer-events-none{hinted}")
                                                     } else {
-                                                        "absolute inset-0 flex items-center justify-center h-10 rounded-lg text-content hover:bg-bg focus:outline-none transition-opacity duration-300 ease-out delay-150 opacity-100"
+                                                        format!("absolute inset-0 flex items-center justify-center h-10 rounded-lg text-content hover:text-primary focus:outline-none transition-all duration-700 ease-out delay-150 opacity-100{hinted}")
                                                     }
                                                 } else {
-                                                    "absolute inset-0 flex items-center justify-center h-10 rounded-lg text-content hover:bg-bg focus:outline-none transition-opacity duration-200 ease-in opacity-0 pointer-events-none"
+                                                    format!("absolute inset-0 flex items-center justify-center h-10 rounded-lg text-content hover:text-primary focus:outline-none transition-all duration-200 ease-in opacity-0 pointer-events-none{hinted}")
                                                 }
                                             }
                                             prop:disabled=signing_in.get()
@@ -357,13 +453,14 @@ fn Main(
                                             type="button"
                                             title=move || t("welcome.sign_in")
                                             class=move || {
+                                                let hinted = if prompt_sign_in.get() { " sign-in-button-hover border-transparent" } else { "" };
                                                 if sidebar_collapsed.get() {
-                                                    "w-full flex items-center justify-center gap-x-2 h-10 px-4 text-sm font-medium rounded-lg border border-border text-content hover:bg-bg focus:outline-none transition-opacity duration-200 ease-in opacity-0 pointer-events-none"
+                                                    format!("w-full flex items-center justify-center gap-x-2 h-10 px-4 text-sm font-medium rounded-lg border border-border text-content hover:text-primary focus:outline-none transition-all duration-200 ease-in opacity-0 pointer-events-none{hinted}")
                                                 } else {
                                                     if signing_in.get() {
-                                                        "w-full flex items-center justify-center gap-x-2 h-10 px-4 text-sm font-medium rounded-lg border border-border text-content hover:bg-bg focus:outline-none transition-opacity duration-300 ease-out delay-150 opacity-50 pointer-events-none"
+                                                        format!("w-full flex items-center justify-center gap-x-2 h-10 px-4 text-sm font-medium rounded-lg border border-border text-content hover:text-primary focus:outline-none transition-all duration-700 ease-out delay-150 opacity-50 pointer-events-none{hinted}")
                                                     } else {
-                                                        "w-full flex items-center justify-center gap-x-2 h-10 px-4 text-sm font-medium rounded-lg border border-border text-content hover:bg-bg focus:outline-none transition-opacity duration-300 ease-out delay-150 opacity-100"
+                                                        format!("w-full flex items-center justify-center gap-x-2 h-10 px-4 text-sm font-medium rounded-lg border border-border text-content hover:text-primary focus:outline-none transition-all duration-700 ease-out delay-150 opacity-100{hinted}")
                                                     }
                                                 }
                                             }
@@ -380,18 +477,30 @@ fn Main(
                     </div>
                 </aside>
 
-                <SidebarDivider collapsed=sidebar_collapsed on_toggle=sidebar_toggle />
+                <SidebarDivider collapsed=sidebar_collapsed on_toggle=sidebar_toggle mouse_in_sidebar=mouse_in_sidebar />
 
-                // Right content area — the section content comes in a later phase.
-                <main class="flex-1 min-w-0 overflow-y-auto px-8 py-8">
-                    <div class="max-w-4xl mx-auto">
-                        <h1 class="text-2xl font-semibold text-content">{move || t("nav.repos")}</h1>
-                        <p class="mt-2 text-sm text-muted">{move || t("screen.placeholder_phase4")}</p>
-                        <Show when=move || error.get().is_some()>
-                            <div class="w-full mt-4 p-3 text-sm rounded-lg border border-red-200 bg-red-50 text-red-700 text-left dark:border-red-900 dark:bg-red-950 dark:text-red-300">
-                                {move || error.get().unwrap_or_default()}
-                            </div>
-                        </Show>
+                // Right content area: the Repos list (self-manages its data,
+                // gated on the session). Blurs while the sign-in hint is active.
+                <main class=move || {
+                    // No bottom padding: screens are `h-full`, so a screen's own
+                    // bottom bar (e.g. the repos pagination) can sit flush with the
+                    // viewport bottom and line up with the sidebar's account divider.
+                    let base = "flex-1 min-w-0 overflow-y-auto px-8 pt-8 transition-all duration-700";
+                    if prompt_sign_in.get() {
+                        format!("{base} sign-in-hint-soften pointer-events-none")
+                    } else {
+                        base.to_string()
+                    }
+                }>
+                    <div class="max-w-4xl mx-auto h-full">
+                        {move || match current_section.get() {
+                            AppSection::Repos => view! {
+                                <Repos account=account pending_count=pending_count on_sign_in_hint=on_sign_in_hint />
+                            }.into_view(),
+                            section => view! {
+                                <PlaceholderSection section=section />
+                            }.into_view(),
+                        }}
                     </div>
                 </main>
             </div>
@@ -403,14 +512,17 @@ fn Main(
 fn NavItem(
     icon: IconName,
     #[prop(into)] label: Signal<&'static str>,
-    active: bool,
+    #[prop(into)] active: Signal<bool>,
     #[prop(into)] collapsed: Signal<bool>,
+    on_select: Callback<()>,
 ) -> impl IntoView {
     // Sidebar item: full-width, left-aligned row with icon + label.
-    let class = if active {
-        "w-full flex items-center gap-2.5 h-10 pl-[24px] pr-3 overflow-hidden text-sm font-medium rounded-lg bg-primary-soft text-primary hover:bg-primary-soft/80"
-    } else {
-        "w-full flex items-center gap-2.5 h-10 pl-[24px] pr-3 overflow-hidden text-sm font-medium rounded-lg text-muted hover:bg-bg hover:text-content transition-colors"
+    let class = move || {
+        if active.get() {
+            "w-full flex items-center gap-2.5 h-10 pl-[24px] pr-3 overflow-hidden text-sm font-medium rounded-lg bg-primary-soft text-primary hover:bg-primary-soft/80"
+        } else {
+            "w-full flex items-center gap-2.5 h-10 pl-[24px] pr-3 overflow-hidden text-sm font-medium rounded-lg text-muted hover:bg-bg hover:text-content transition-colors"
+        }
     };
     let wrapper_class = "pr-[7px]";
     let label_class = move || {
@@ -422,10 +534,27 @@ fn NavItem(
     };
     view! {
         <div class=wrapper_class>
-            <button type="button" title=move || label.get() class=class>
+            <button
+                type="button"
+                title=move || label.get()
+                class=class
+                on:click=move |_| on_select.call(())
+            >
                 <Icon name=icon class="size-4" />
                 <span class=label_class>{move || label.get()}</span>
             </button>
+        </div>
+    }
+}
+
+#[component]
+fn PlaceholderSection(section: AppSection) -> impl IntoView {
+    view! {
+        <div class="flex flex-col gap-5 h-full">
+            <h1 class="text-2xl font-semibold text-content">{move || t(section.label_key())}</h1>
+            <div class="flex flex-1 items-center justify-center py-16 text-center">
+                <p class="text-sm text-muted">{move || t("screen.placeholder_phase4")}</p>
+            </div>
         </div>
     }
 }
@@ -450,10 +579,10 @@ fn AccountAvatar(account: api::Account) -> impl IntoView {
 }
 
 #[component]
-fn SidebarDivider(#[prop(into)] collapsed: Signal<bool>, on_toggle: Callback<()>) -> impl IntoView {
+fn SidebarDivider(#[prop(into)] collapsed: Signal<bool>, on_toggle: Callback<()>, #[prop(into)] mouse_in_sidebar: Signal<bool>) -> impl IntoView {
     let hovering = RwSignal::new(false);
     let button_class = move || {
-        if hovering.get() {
+        if hovering.get() || mouse_in_sidebar.get() {
             "absolute top-8 left-[-13px] z-30 flex items-center justify-center size-8 text-content opacity-100 hover:text-primary focus:opacity-100 focus:outline-none transition-opacity duration-150"
         } else {
             "absolute top-8 left-[-13px] z-30 flex items-center justify-center size-8 text-muted opacity-0 hover:text-primary hover:opacity-100 focus:opacity-100 focus:outline-none transition-opacity duration-150"
@@ -471,10 +600,6 @@ fn SidebarDivider(#[prop(into)] collapsed: Signal<bool>, on_toggle: Callback<()>
             on:mouseenter=move |_| hovering.set(true)
             on:mouseleave=move |_| hovering.set(false)
         >
-            <div
-                class="absolute inset-y-0 left-[-3px] z-20 w-[7px] cursor-pointer bg-transparent"
-                on:mouseenter=move |_| hovering.set(true)
-            ></div>
             <div class="absolute inset-y-0 left-0 w-px bg-border pointer-events-none"></div>
             <button
                 type="button"
@@ -535,10 +660,14 @@ fn CommandPaletteTrigger(on_open: Callback<()>) -> impl IntoView {
 
 /// Command palette modal: full-screen dialog with search + keyboard navigation.
 /// Velox-style: clean UI, arrow key navigation, history persistence, footer hints.
-/// Commands: nav items (repos/connect/keys/forge), toggle theme/language. Real
+/// Commands: nav items (repos/connect/keys), toggle theme/language. Real
 /// actions (create key, bind target) land once those screens exist.
 #[component]
-fn CommandPalette(open: RwSignal<bool>) -> impl IntoView {
+fn CommandPalette(
+    open: RwSignal<bool>,
+    #[allow(unused_variables)] pending_count: RwSignal<usize>,
+    progress: ProgressHandle,
+) -> impl IntoView {
     let query = RwSignal::new(String::new());
     let input_ref = NodeRef::<html::Input>::new();
     let selected = RwSignal::new(0_usize); // Keyboard-selected index
@@ -592,7 +721,7 @@ fn CommandPalette(open: RwSignal<bool>) -> impl IntoView {
 
     // Command definitions: (i18n key, icon, action). IconName resolves to
     // external SVG assets under assets/images/svg/icons.
-    let all_commands = move || -> Vec<(&'static str, IconName, Box<dyn Fn()>)> {
+    let all_commands = move || -> Vec<PaletteCommand> {
         let locale = i18n::locale();
         let theme_signal = theme::theme();
         vec![
@@ -603,7 +732,6 @@ fn CommandPalette(open: RwSignal<bool>) -> impl IntoView {
             ),
             ("nav.connect", IconName::Server, Box::new(|| {})),
             ("nav.keys", IconName::Key, Box::new(|| {})),
-            ("nav.forge", IconName::Key, Box::new(|| {})),
             (
                 "palette.toggle_theme",
                 IconName::Moon,
@@ -627,8 +755,10 @@ fn CommandPalette(open: RwSignal<bool>) -> impl IntoView {
                     };
                     locale.set(next);
                     let code = next.code();
+                    let sim = progress.begin_simulated();
                     spawn_local(async move {
                         let _ = api::set_language(code).await;
+                        progress.end_simulated(&sim);
                     });
                     open.set(false);
                 }),
@@ -637,7 +767,7 @@ fn CommandPalette(open: RwSignal<bool>) -> impl IntoView {
     };
 
     // Filtered commands: if query empty, show history; else substring match.
-    let filtered = move || -> Vec<(String, Option<IconName>, Box<dyn Fn()>)> {
+    let filtered = move || -> Vec<FilteredCommand> {
         let q = query.get().trim().to_lowercase();
         if q.is_empty() {
             // Show history (no icon, action re-runs search).
@@ -827,11 +957,114 @@ fn IconButton(
         <button
             type="button"
             title=move || title.get()
-            class="shrink-0 flex justify-center items-center size-9 rounded-lg text-muted hover:bg-bg hover:text-content focus:outline-none transition-colors"
+            class="shrink-0 flex justify-center items-center size-8 rounded-lg text-muted hover:bg-bg hover:text-content focus:outline-none transition-colors"
             on:click=move |_| on_click.call(())
         >
             {children()}
         </button>
+    }
+}
+
+#[derive(Clone, Copy)]
+struct QuickRouteLink {
+    label_key: &'static str,
+    url: &'static str,
+}
+
+const QUICK_ROUTE_LINKS: &[QuickRouteLink] = &[
+    QuickRouteLink {
+        label_key: "quick_routes.github_repository",
+        url: GITHUB_REPOSITORY_URL,
+    },
+    QuickRouteLink {
+        label_key: "quick_routes.feedback",
+        url: FEEDBACK_URL,
+    },
+    QuickRouteLink {
+        label_key: "quick_routes.support",
+        url: SUPPORT_URL,
+    },
+];
+
+/// Quick routes: app menu shortcuts on the left and external links on the
+/// right. External URLs are build-time placeholders wired through env vars.
+#[component]
+fn QuickRoutesMenu(
+    current_section: RwSignal<AppSection>,
+    #[allow(unused_variables)] pending_count: RwSignal<usize>,
+    progress: ProgressHandle,
+) -> impl IntoView {
+    let open = RwSignal::new(false);
+
+    let open_route = move |url: &'static str| {
+        open.set(false);
+        let sim = progress.begin_simulated();
+        spawn_local(async move {
+            let _ = api::open_url(url).await;
+            progress.end_simulated(&sim);
+        });
+    };
+
+    view! {
+        <div class="relative">
+            <IconButton
+                title=move || t("quick_routes.title")
+                on_click=Callback::new(move |_| open.update(|o| *o = !*o))
+            >
+                <Icon name=IconName::QuickRoutes class="size-4" />
+            </IconButton>
+
+            <Show when=move || open.get()>
+                <div class="fixed inset-0 z-40" on:click=move |_| open.set(false)></div>
+
+                <div class="absolute end-0 mt-2 z-50 w-[460px] overflow-hidden bg-surface border border-border rounded-xl shadow-xl">
+                    <div class="grid grid-cols-[12rem_minmax(0,1fr)]">
+                        <div class="p-1 border-r border-border bg-bg/60">
+                            {APP_SECTIONS.iter().copied().map(|section| {
+                                view! {
+                                    <button
+                                        type="button"
+                                        class="w-full flex items-center gap-x-2 py-2 px-2.5 rounded-lg text-sm text-content hover:bg-surface focus:outline-none focus:bg-surface transition-colors"
+                                        on:click=move |_| {
+                                            current_section.set(section);
+                                            open.set(false);
+                                        }
+                                    >
+                                        <Icon name=section.icon() class="size-4" />
+                                        <span class="min-w-0 truncate text-left">{move || t(section.label_key())}</span>
+                                    </button>
+                                }
+                            }).collect_view()}
+                        </div>
+
+                        <div class="p-1">
+                            {QUICK_ROUTE_LINKS.iter().copied().map(|item| {
+                                view! {
+                                    <button
+                                        type="button"
+                                        title=item.url
+                                        class="w-full flex items-center justify-between gap-x-3 py-2 px-2.5 rounded-lg text-sm text-content hover:bg-bg focus:outline-none focus:bg-bg transition-colors"
+                                        on:click=move |_| open_route(item.url)
+                                    >
+                                        <span class="min-w-0 truncate text-left">{move || t(item.label_key)}</span>
+                                        <span class="shrink-0 text-xs text-muted">"↗"</span>
+                                    </button>
+                                }
+                            }).collect_view()}
+                        </div>
+                    </div>
+                </div>
+            </Show>
+        </div>
+    }
+}
+
+#[component]
+fn PlaceholderSettingsButton() -> impl IntoView {
+    view! {
+        <IconButton title=move || t("settings.placeholder") on_click=Callback::new(|_| {})>
+            <Icon name=IconName::SettingsPlaceholder class="size-4" />
+        </IconButton>
     }
 }
 
@@ -843,7 +1076,10 @@ fn IconButton(
 /// by a local signal — no Preline JS — and a transparent full-screen backdrop
 /// catches click-outside to close.
 #[component]
-fn LanguageToggle() -> impl IntoView {
+fn LanguageToggle(
+    progress: ProgressHandle,
+    #[allow(unused_variables)] pending_count: RwSignal<usize>,
+) -> impl IntoView {
     let locale = i18n::locale();
     let open = RwSignal::new(false);
 
@@ -851,8 +1087,10 @@ fn LanguageToggle() -> impl IntoView {
         locale.set(next);
         open.set(false);
         let code = next.code();
+        let sim = progress.begin_simulated();
         spawn_local(async move {
             let _ = api::set_language(code).await;
+            progress.end_simulated(&sim);
         });
     };
 
@@ -937,22 +1175,4 @@ fn detect_locale() -> Locale {
         .and_then(|w| w.navigator().language())
         .map(|code| Locale::from_code(&code))
         .unwrap_or(Locale::En)
-}
-
-/// Browser clipboard write via the async Clipboard API. Best-effort.
-fn copy_to_clipboard(text: &str) {
-    if let Some(window) = web_sys::window() {
-        let clipboard = window.navigator().clipboard();
-        let _ = clipboard.write_text(text);
-    }
-}
-
-/// Resolve after roughly `secs` seconds using `setTimeout`.
-async fn sleep_secs(secs: u64) {
-    let promise = js_sys::Promise::new(&mut |resolve, _reject| {
-        let window = web_sys::window().expect("window exists");
-        let _ = window
-            .set_timeout_with_callback_and_timeout_and_arguments_0(&resolve, (secs * 1000) as i32);
-    });
-    let _ = wasm_bindgen_futures::JsFuture::from(promise).await;
 }

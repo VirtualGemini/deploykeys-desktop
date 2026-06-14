@@ -9,16 +9,18 @@ use leptos::*;
 pub enum IconName {
     Brand,
     Check,
+    ChevronLeft,
+    ChevronRight,
     Close,
     Folder,
     Github,
-    GithubDark,
-    GithubLight,
     Globe,
     Key,
     Monitor,
     Moon,
+    QuickRoutes,
     Server,
+    SettingsPlaceholder,
     SignOut,
     SidebarToggle,
     SidebarToggleFilled,
@@ -30,16 +32,18 @@ impl IconName {
         match self {
             IconName::Brand => "assets/images/svg/icons/brand.svg",
             IconName::Check => "assets/images/svg/icons/check.svg",
+            IconName::ChevronLeft => "assets/images/svg/icons/chevron-left.svg",
+            IconName::ChevronRight => "assets/images/svg/icons/chevron-right.svg",
             IconName::Close => "assets/images/svg/icons/close.svg",
             IconName::Folder => "assets/images/svg/icons/folder.svg",
             IconName::Github => "assets/images/svg/icons/github.svg",
-            IconName::GithubDark => "assets/images/svg/icons/github-dark.svg",
-            IconName::GithubLight => "assets/images/svg/icons/github-light.svg",
             IconName::Globe => "assets/images/svg/icons/globe.svg",
             IconName::Key => "assets/images/svg/icons/key.svg",
             IconName::Monitor => "assets/images/svg/icons/monitor.svg",
             IconName::Moon => "assets/images/svg/icons/moon.svg",
+            IconName::QuickRoutes => "assets/images/svg/icons/quick-routes.svg",
             IconName::Server => "assets/images/svg/icons/server.svg",
+            IconName::SettingsPlaceholder => "assets/images/svg/icons/settings-placeholder.svg",
             IconName::SignOut => "assets/images/svg/icons/sign-out.svg",
             IconName::SidebarToggle => "assets/images/svg/icons/sidebar-toggle.svg",
             IconName::SidebarToggleFilled => "assets/images/svg/icons/sidebar-toggle-filled.svg",
@@ -68,7 +72,10 @@ pub fn Icon(name: IconName, #[prop(into, optional)] class: String) -> impl IntoV
 
 /// Direct SVG icon - renders the SVG file as an <img> without mask
 #[component]
-pub fn IconSvg(#[prop(into)] name: Signal<IconName>, #[prop(into, optional)] class: String) -> impl IntoView {
+pub fn IconSvg(
+    #[prop(into)] name: Signal<IconName>,
+    #[prop(into, optional)] class: String,
+) -> impl IntoView {
     let base_class = "shrink-0 inline-block";
     let combined_class = if class.is_empty() {
         base_class.to_string()

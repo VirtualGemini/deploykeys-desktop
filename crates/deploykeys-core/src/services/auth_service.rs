@@ -1,11 +1,14 @@
 use crate::credentials::CredentialStore;
 use crate::db::Database;
-use crate::github::{GitHubClient, TokenSet};
+use crate::github::GitHubClient;
 use crate::models::{Account, AuthType};
+use crate::progress::{OperationId, ProgressReporter};
 use crate::{Error, Result};
 use chrono::Utc;
 
-/// Completes GitHub sign-ins: resolves the user, stores tokens in the system
+const OP_SIGN_IN: &str = "auth.sign_in";
+
+/// Completes GitHub sign-ins: resolves the user, stores the token in the system
 /// keyring, and persists the account row.
 pub struct AuthService {
     db: Database,
@@ -25,48 +28,40 @@ impl AuthService {
         Self { db, github }
     }
 
-    /// Finish a device-flow sign-in.
+    /// Sign in with a Personal Access Token.
     ///
-    /// Fetches the authenticated user, stores the access (and refresh) token
-    /// in the system keyring, and creates or updates the account record so the
-    /// session survives restarts.
-    pub async fn complete_device_flow(&self, tokens: TokenSet) -> Result<Account> {
-        let user = self
-            .github
-            .get_authenticated_user(&tokens.access_token)
-            .await?;
+    /// Validates the token by fetching the authenticated user, stores it in the
+    /// system keyring, and creates or updates the account record so the session
+    /// survives restarts.
+    pub async fn sign_in_with_token<P: ProgressReporter>(
+        &self,
+        token: String,
+        progress: &P,
+    ) -> Result<Account> {
+        let op = OperationId::from(OP_SIGN_IN);
+        progress.report(op.clone(), 10);
+        let user = self.github.get_authenticated_user(&token).await?;
 
         let login = user.login.clone();
-        let access_token = tokens.access_token.clone();
-        let refresh_token = tokens.refresh_token.clone();
+        progress.report(op.clone(), 35);
 
         // Keyring access is blocking; keep it off the async runtime threads.
-        let (token_ref, refresh_token_ref) =
-            tokio::task::spawn_blocking(move || -> Result<(String, Option<String>)> {
-                let token_ref = CredentialStore::store_token(&login, &access_token)?;
-                let refresh_token_ref = match refresh_token {
-                    Some(token) => Some(CredentialStore::store_refresh_token(&login, &token)?),
-                    None => None,
-                };
-                Ok((token_ref, refresh_token_ref))
-            })
-            .await
-            .map_err(|e| Error::Other(format!("Keyring task failed: {}", e)))??;
+        let token_ref =
+            tokio::task::spawn_blocking(move || CredentialStore::store_token(&login, &token))
+                .await
+                .map_err(|e| Error::Other(format!("Keyring task failed: {}", e)))??;
 
-        let token_expires_at = tokens
-            .expires_in
-            .map(|secs| Utc::now() + chrono::Duration::seconds(secs as i64));
+        progress.report(op.clone(), 65);
         let now = Utc::now();
-
         let accounts = self.db.accounts();
         let account = match accounts.find_by_github_user_id(user.id).await? {
             Some(mut existing) => {
                 existing.login = user.login.clone();
                 existing.avatar_url = user.avatar_url.clone();
-                existing.auth_type = AuthType::GitHubAppDeviceFlow;
+                existing.auth_type = AuthType::PersonalAccessToken;
                 existing.token_ref = token_ref;
-                existing.refresh_token_ref = refresh_token_ref;
-                existing.token_expires_at = token_expires_at;
+                existing.refresh_token_ref = None;
+                existing.token_expires_at = None;
                 existing.last_login_at = now;
                 accounts.update(&existing).await?;
                 existing
@@ -77,10 +72,10 @@ impl AuthService {
                     github_user_id: user.id,
                     login: user.login.clone(),
                     avatar_url: user.avatar_url.clone(),
-                    auth_type: AuthType::GitHubAppDeviceFlow,
+                    auth_type: AuthType::PersonalAccessToken,
                     token_ref,
-                    refresh_token_ref,
-                    token_expires_at,
+                    refresh_token_ref: None,
+                    token_expires_at: None,
                     created_at: now,
                     last_login_at: now,
                 };
@@ -89,7 +84,35 @@ impl AuthService {
             }
         };
 
+        progress.report(op, 100);
         Ok(account)
+    }
+
+    /// Sign out: remove every persisted account and its keyring tokens.
+    ///
+    /// The app is single-account today, but we clear all rows so no stale
+    /// session can resurface on the next launch. Keyring deletion is
+    /// best-effort — a missing entry must not block sign-out. Deleting the
+    /// account row cascades to repositories and key bindings.
+    pub async fn sign_out(&self) -> Result<()> {
+        let accounts = self.db.accounts();
+        for account in accounts.list_all().await? {
+            let token_ref = account.token_ref.clone();
+            let refresh_token_ref = account.refresh_token_ref.clone();
+
+            // Keyring access is blocking; keep it off the async runtime threads.
+            tokio::task::spawn_blocking(move || {
+                let _ = CredentialStore::delete_token(&token_ref);
+                if let Some(refresh_token_ref) = refresh_token_ref {
+                    let _ = CredentialStore::delete_credential(&refresh_token_ref);
+                }
+            })
+            .await
+            .map_err(|e| Error::Other(format!("Keyring task failed: {}", e)))?;
+
+            accounts.delete(account.id).await?;
+        }
+        Ok(())
     }
 }
 
@@ -98,7 +121,7 @@ mod tests {
     use super::*;
     use crate::credentials::test_support::use_mock_keyring;
     use crate::db::test_support::test_db;
-    use crate::github::TokenSet;
+    use crate::progress::NoOpProgressReporter;
 
     /// Each test gets a distinct login: the mock keyring store is
     /// process-wide, so a shared login would race across parallel tests.
@@ -116,7 +139,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn complete_device_flow_creates_account_and_stores_tokens() {
+    async fn sign_in_creates_account_and_stores_token() {
         use_mock_keyring();
         let (_dir, db) = test_db().await;
 
@@ -127,11 +150,7 @@ mod tests {
         let service = AuthService::with_github_client(db.clone(), github);
 
         let account = service
-            .complete_device_flow(TokenSet {
-                access_token: "ghu_test_access".to_string(),
-                refresh_token: Some("ghr_test_refresh".to_string()),
-                expires_in: Some(28800),
-            })
+            .sign_in_with_token("ghp_test_pat".to_string(), &NoOpProgressReporter)
             .await
             .unwrap();
 
@@ -139,15 +158,11 @@ mod tests {
         assert_eq!(account.login, "octo-create");
         assert_eq!(account.github_user_id, 4242);
         assert_eq!(account.token_ref, "github_token_octo-create");
-        assert_eq!(
-            account.refresh_token_ref.as_deref(),
-            Some("github_refresh_token_octo-create")
-        );
-        assert!(account.token_expires_at.is_some());
+        assert_eq!(account.auth_type, AuthType::PersonalAccessToken);
 
-        // Tokens are retrievable through the stored references.
+        // Token is retrievable through the stored reference.
         let stored = CredentialStore::get_token(&account.token_ref).unwrap();
-        assert_eq!(stored, "ghu_test_access");
+        assert_eq!(stored, "ghp_test_pat");
 
         // The row is persisted.
         let reloaded = db.accounts().find_by_github_user_id(4242).await.unwrap();
@@ -155,7 +170,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn complete_device_flow_updates_existing_account() {
+    async fn sign_in_updates_existing_account() {
         use_mock_keyring();
         let (_dir, db) = test_db().await;
 
@@ -166,20 +181,12 @@ mod tests {
         let service = AuthService::with_github_client(db.clone(), github);
 
         let first = service
-            .complete_device_flow(TokenSet {
-                access_token: "ghu_first".to_string(),
-                refresh_token: None,
-                expires_in: None,
-            })
+            .sign_in_with_token("ghp_first".to_string(), &NoOpProgressReporter)
             .await
             .unwrap();
 
         let second = service
-            .complete_device_flow(TokenSet {
-                access_token: "ghu_second".to_string(),
-                refresh_token: None,
-                expires_in: None,
-            })
+            .sign_in_with_token("ghp_second".to_string(), &NoOpProgressReporter)
             .await
             .unwrap();
 
@@ -189,6 +196,39 @@ mod tests {
         assert_eq!(all.len(), 1);
 
         let stored = CredentialStore::get_token(&second.token_ref).unwrap();
-        assert_eq!(stored, "ghu_second");
+        assert_eq!(stored, "ghp_second");
+    }
+
+    #[tokio::test]
+    async fn sign_out_clears_account_and_token() {
+        use_mock_keyring();
+        let (_dir, db) = test_db().await;
+
+        let mut server = mockito::Server::new_async().await;
+        user_endpoint_mock(&mut server, "octo-signout", 6262).await;
+
+        let github = GitHubClient::new().unwrap().with_base_url(server.url());
+        let service = AuthService::with_github_client(db.clone(), github);
+
+        let account = service
+            .sign_in_with_token("ghp_signout".to_string(), &NoOpProgressReporter)
+            .await
+            .unwrap();
+
+        service.sign_out().await.unwrap();
+
+        // The session is gone: no rows, and the token is no longer retrievable.
+        assert!(db.accounts().list_all().await.unwrap().is_empty());
+        assert!(CredentialStore::get_token(&account.token_ref).is_err());
+    }
+
+    #[tokio::test]
+    async fn sign_out_is_ok_with_no_session() {
+        use_mock_keyring();
+        let (_dir, db) = test_db().await;
+        let github = GitHubClient::new().unwrap();
+        let service = AuthService::with_github_client(db, github);
+
+        service.sign_out().await.unwrap();
     }
 }

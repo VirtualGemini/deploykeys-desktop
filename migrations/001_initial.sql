@@ -12,24 +12,11 @@ CREATE TABLE accounts (
     last_login_at INTEGER NOT NULL
 );
 
--- Create github_installations table
-CREATE TABLE github_installations (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    github_installation_id INTEGER NOT NULL UNIQUE,
-    account_id INTEGER NOT NULL,
-    account_owner TEXT NOT NULL,
-    account_type TEXT NOT NULL,
-    permissions_snapshot TEXT,
-    repository_selection TEXT NOT NULL,
-    last_synced_at INTEGER,
-    FOREIGN KEY (account_id) REFERENCES accounts(id) ON DELETE CASCADE
-);
-
 -- Create repositories table
 CREATE TABLE repositories (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     github_repo_id INTEGER NOT NULL UNIQUE,
-    installation_id INTEGER NOT NULL,
+    account_id INTEGER NOT NULL,
     owner TEXT NOT NULL,
     name TEXT NOT NULL,
     full_name TEXT NOT NULL,
@@ -38,9 +25,10 @@ CREATE TABLE repositories (
     default_branch TEXT,
     ssh_url TEXT NOT NULL,
     html_url TEXT NOT NULL,
+    language TEXT,
     permissions_snapshot TEXT,
     last_synced_at INTEGER,
-    FOREIGN KEY (installation_id) REFERENCES github_installations(id) ON DELETE CASCADE
+    FOREIGN KEY (account_id) REFERENCES accounts(id) ON DELETE CASCADE
 );
 
 -- Create targets table
@@ -87,5 +75,4 @@ CREATE INDEX idx_key_bindings_status ON key_bindings(status);
 CREATE INDEX idx_key_bindings_repo_id ON key_bindings(repo_id);
 CREATE INDEX idx_key_bindings_target_id ON key_bindings(target_id);
 CREATE INDEX idx_repositories_full_name ON repositories(full_name);
-CREATE INDEX idx_repositories_installation_id ON repositories(installation_id);
-CREATE INDEX idx_github_installations_account_id ON github_installations(account_id);
+CREATE INDEX idx_repositories_account_id ON repositories(account_id);
