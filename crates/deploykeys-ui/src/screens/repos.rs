@@ -433,6 +433,8 @@ fn PaginationBar(
                 {move || t("repos.total").replace("{}", &total.get().to_string())}
             </span>
 
+            <span class="text-sm text-border select-none" aria-hidden="true">|</span>
+
             <div class="flex items-center gap-1.5">
                 <button
                     type="button"
@@ -457,7 +459,11 @@ fn PaginationBar(
                 </button>
             </div>
 
+            <span class="text-sm text-border select-none" aria-hidden="true">|</span>
+
             <PageSizeSelector />
+
+            <span class="text-sm text-border select-none" aria-hidden="true">|</span>
 
             <div class="flex items-center gap-1.5">
                 <span class="text-sm text-muted">

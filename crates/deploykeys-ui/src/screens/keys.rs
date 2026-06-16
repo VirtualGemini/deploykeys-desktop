@@ -240,26 +240,27 @@ pub fn Keys(#[allow(unused_variables)] pending_count: RwSignal<usize>) -> impl I
                         fallback=move || view! { <p class="text-sm text-muted">{move || t("keys.no_match")}</p> }
                     >
                             <div class="flex flex-col gap-4 flex-1 min-h-0">
-                                <div class="flex-1 overflow-auto min-h-0 rounded-lg border border-border bg-surface">
-                                    <table class="w-full border-collapse text-sm">
+                                <div class="flex-1 overflow-x-auto overflow-y-auto min-h-0 rounded-lg border border-border bg-surface">
+                                    <table class="min-w-[84rem] w-full border-collapse text-sm">
                                         <thead class="sticky top-0 z-10 bg-surface">
                                             <tr class="border-b border-border">
-                                                <th class="text-start font-medium text-muted px-4 py-2.5 whitespace-nowrap">
+                                                <th class="w-[16rem] min-w-[16rem] text-start font-medium text-muted px-4 py-2.5 whitespace-nowrap">
                                                     {move || t("keys.directory")}
                                                 </th>
-                                                <th class="text-start font-medium text-muted px-4 py-2.5 whitespace-nowrap">
+                                                <th class="w-[9rem] min-w-[9rem] text-start font-medium text-muted px-4 py-2.5 whitespace-nowrap">
                                                     {move || t("keys.algorithm")}
                                                 </th>
-                                                <th class="text-start font-medium text-muted px-4 py-2.5 whitespace-nowrap">
+                                                <th class="w-[20rem] min-w-[20rem] text-start font-medium text-muted px-4 py-2.5 whitespace-nowrap">
                                                     {move || t("keys.comment")}
                                                 </th>
-                                                <th class="text-start font-medium text-muted px-4 py-2.5 whitespace-nowrap">
+                                                <th class="w-[18rem] min-w-[18rem] text-start font-medium text-muted px-4 py-2.5 whitespace-nowrap">
                                                     {move || t("keys.remark")}
                                                 </th>
-                                                <th class="text-start font-medium text-muted px-4 py-2.5 whitespace-nowrap">
+                                                <th class="w-[12rem] min-w-[12rem] text-start font-medium text-muted px-4 py-2.5 whitespace-nowrap">
                                                     {move || t("keys.created_at")}
                                                 </th>
-                                                <th class="text-end font-medium text-muted px-4 py-2.5 whitespace-nowrap">
+                                                <th class="sticky right-0 z-20 w-[8rem] min-w-[8rem] bg-surface text-start font-medium text-muted px-3 py-2.5 whitespace-nowrap relative">
+                                                    <span class="pointer-events-none absolute inset-y-0 left-0 w-px bg-border"></span>
                                                     {move || t("keys.actions")}
                                                 </th>
                                             </tr>
@@ -280,46 +281,53 @@ pub fn Keys(#[allow(unused_variables)] pending_count: RwSignal<usize>) -> impl I
                                                 let delete_confirm_open = RwSignal::new(false);
                                                 let edit_open = RwSignal::new(false);
                                                 view! {
-                                                    <tr class="border-b border-border last:border-b-0 hover:bg-bg align-top">
-                                                        <td class="px-4 py-3">
+                                                    <tr class="group border-b border-border last:border-b-0 hover:bg-bg align-top">
+                                                        <td class="min-w-[16rem] px-4 py-3">
                                                             <span class="font-medium text-content font-mono break-all">{directory}</span>
                                                         </td>
-                                                        <td class="px-4 py-3 whitespace-nowrap">
+                                                        <td class="min-w-[9rem] px-4 py-3 whitespace-nowrap">
                                                             <span class="text-[11px] py-0.5 px-2 rounded-full border border-border text-muted">
                                                                 {algorithm}
                                                             </span>
                                                         </td>
-                                                        <td class="px-4 py-3">
+                                                        <td class="min-w-[20rem] px-4 py-3">
                                                             <span class="text-content font-mono break-all">{comment}</span>
                                                         </td>
-                                                        <td class="px-4 py-3 max-w-[20rem]">
-                                                            <span class="text-muted break-words line-clamp-2">
+                                                        <td class="min-w-[18rem] px-4 py-3">
+                                                            <span class="text-muted break-words line-clamp-3">
                                                                 {if remark.is_empty() { "—".to_string() } else { remark }}
                                                             </span>
                                                         </td>
-                                                        <td class="px-4 py-3 text-muted whitespace-nowrap">{created_at}</td>
-                                                        <td class="px-4 py-3">
-                                                            <div class="inline-flex gap-2">
+                                                        <td class="min-w-[12rem] px-4 py-3 text-muted whitespace-nowrap">{created_at}</td>
+                                                        <td class="sticky right-0 z-[1] min-w-[8rem] bg-surface px-3 py-3 group-hover:bg-bg relative">
+                                                            <span class="pointer-events-none absolute inset-y-0 left-0 w-px bg-border"></span>
+                                                            <div class="inline-flex min-w-max items-center gap-1.5">
                                                                 <button
                                                                     type="button"
-                                                                    class="py-1 px-3 text-xs font-medium rounded-md text-primary hover:bg-primary-soft focus:outline-none"
+                                                                    title=move || t("keys.copy_public_key")
+                                                                    aria-label=move || t("keys.copy_public_key")
+                                                                    class="inline-flex items-center justify-center size-8 rounded-md text-primary hover:bg-primary-soft focus:outline-none"
                                                                     on:click=move |_| copy_public_key(key_id)
                                                                 >
-                                                                    {move || t("keys.copy_public_key")}
+                                                                    <Icon name=IconName::Copy class="size-4" />
                                                                 </button>
                                                                 <button
                                                                     type="button"
-                                                                    class="py-1 px-3 text-xs font-medium rounded-md text-content hover:bg-bg focus:outline-none"
+                                                                    title=move || t("keys.edit")
+                                                                    aria-label=move || t("keys.edit")
+                                                                    class="inline-flex items-center justify-center size-8 rounded-md text-content hover:bg-primary-soft dark:hover:bg-primary-soft/60 focus:outline-none"
                                                                     on:click=move |_| edit_open.set(true)
                                                                 >
-                                                                    {move || t("keys.edit")}
+                                                                    <Icon name=IconName::Edit class="size-4" />
                                                                 </button>
                                                                 <button
                                                                     type="button"
-                                                                    class="py-1 px-3 text-xs font-medium rounded-md text-red-600 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-950 focus:outline-none"
+                                                                    title=move || t("keys.delete")
+                                                                    aria-label=move || t("keys.delete")
+                                                                    class="inline-flex items-center justify-center size-8 rounded-md text-red-600 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-950 focus:outline-none"
                                                                     on:click=move |_| delete_confirm_open.set(true)
                                                                 >
-                                                                    {move || t("keys.delete")}
+                                                                    <Icon name=IconName::Delete class="size-4" />
                                                                 </button>
                                                             </div>
                                                         </td>
@@ -497,6 +505,10 @@ fn DateRangeDropdown(
     on_change: Callback<()>,
 ) -> impl IntoView {
     let open = RwSignal::new(false);
+    let draft_from = RwSignal::new(None::<SimpleDate>);
+    let draft_to = RwSignal::new(None::<SimpleDate>);
+    let calendar_month = RwSignal::new(initial_calendar_month(from, to));
+
     let label = Signal::derive(move || {
         let from_value = from.get();
         let to_value = to.get();
@@ -508,71 +520,404 @@ fn DateRangeDropdown(
         }
     });
 
-    let clear = move |_| {
+    let open_picker = move |_| {
+        draft_from.set(parse_date(&from.get_untracked()));
+        draft_to.set(parse_date(&to.get_untracked()));
+        calendar_month.set(initial_calendar_month(from, to));
+        open.update(|o| *o = !*o);
+    };
+
+    let clear = move || {
+        draft_from.set(None);
+        draft_to.set(None);
         from.set(String::new());
         to.set(String::new());
         on_change.call(());
     };
 
+    let apply = move || {
+        from.set(
+            draft_from
+                .get_untracked()
+                .map(format_date)
+                .unwrap_or_default(),
+        );
+        to.set(
+            draft_to
+                .get_untracked()
+                .map(format_date)
+                .unwrap_or_default(),
+        );
+        open.set(false);
+        on_change.call(());
+    };
+
+    let cancel = move || {
+        open.set(false);
+        draft_from.set(parse_date(&from.get_untracked()));
+        draft_to.set(parse_date(&to.get_untracked()));
+    };
+
     view! {
-        <div class="relative">
+        <div class="relative min-w-0">
             <button
                 type="button"
-                class="inline-flex items-center justify-center w-44 h-10 px-3 text-sm rounded-lg border border-border bg-bg text-content hover:bg-surface focus:outline-none whitespace-nowrap"
-                on:click=move |_| open.update(|o| *o = !*o)
+                class="inline-flex items-center justify-center w-44 max-w-full h-10 px-3 text-sm rounded-lg border border-border bg-bg text-content hover:bg-surface focus:outline-none whitespace-nowrap"
+                on:click=open_picker
             >
                 <span class="min-w-0 truncate">{move || label.get()}</span>
             </button>
 
             <Show when=move || open.get()>
                 <div class="fixed inset-0 z-40" on:click=move |_| open.set(false)></div>
-                <div class="absolute start-0 mt-1 z-50 w-72 p-3 bg-surface border border-border rounded-xl shadow-xl">
-                    <div class="grid gap-3">
-                        <label class="grid gap-1.5">
-                            <span class="text-xs text-muted">{move || t("keys.filter_created_from")}</span>
-                            <input
-                                type="date"
-                                class="w-full h-9 px-2.5 text-sm rounded-lg border border-border bg-bg text-content focus:outline-none focus:ring-1 focus:ring-primary"
-                                prop:value=move || from.get()
-                                on:input=move |ev| {
-                                    from.set(event_target_value(&ev));
-                                    on_change.call(());
-                                }
-                            />
-                        </label>
-                        <label class="grid gap-1.5">
-                            <span class="text-xs text-muted">{move || t("keys.filter_created_to")}</span>
-                            <input
-                                type="date"
-                                class="w-full h-9 px-2.5 text-sm rounded-lg border border-border bg-bg text-content focus:outline-none focus:ring-1 focus:ring-primary"
-                                prop:value=move || to.get()
-                                on:input=move |ev| {
-                                    to.set(event_target_value(&ev));
-                                    on_change.call(());
-                                }
-                            />
-                        </label>
-                    </div>
-                    <div class="flex justify-between gap-2 mt-3 pt-3 border-t border-border">
+                <div class="absolute end-0 mt-1 z-50 w-[min(calc(100vw-2rem),15rem)] max-w-[calc(100vw-2rem)] bg-surface border border-border shadow-xl rounded-xl overflow-hidden">
+                    <DateRangeCalendar
+                        month=calendar_month
+                        draft_from=draft_from
+                        draft_to=draft_to
+                    />
+
+                    <div class="py-2.5 px-3 flex items-center justify-between gap-x-2 border-t border-border">
                         <button
                             type="button"
-                            class="px-3 py-1.5 text-sm rounded-lg text-muted hover:bg-bg focus:outline-none"
-                            on:click=clear
+                            class="py-1.5 px-2.5 inline-flex items-center text-xs font-medium rounded-lg border border-border bg-bg text-muted hover:bg-surface focus:outline-none"
+                            on:click=move |_| clear()
                         >
                             {move || t("search.clear")}
                         </button>
-                        <button
-                            type="button"
-                            class="px-3 py-1.5 text-sm rounded-lg bg-primary-soft text-primary hover:opacity-80 focus:outline-none"
-                            on:click=move |_| open.set(false)
-                        >
-                            {move || t("common.confirm")}
-                        </button>
+                        <div class="flex items-center justify-end gap-x-2">
+                            <button
+                                type="button"
+                                class="py-1.5 px-2.5 inline-flex items-center text-xs font-medium rounded-lg border border-border bg-bg text-content hover:bg-surface focus:outline-none"
+                                on:click=move |_| cancel()
+                            >
+                                {move || t("common.cancel")}
+                            </button>
+                            <button
+                                type="button"
+                                class="py-1.5 px-2.5 inline-flex items-center text-xs font-medium rounded-lg border border-transparent bg-primary text-on-primary hover:bg-primary-hover focus:outline-none"
+                                on:click=move |_| apply()
+                            >
+                                {move || t("common.confirm")}
+                            </button>
+                        </div>
                     </div>
                 </div>
             </Show>
         </div>
     }
+}
+
+#[component]
+fn DateRangeCalendar(
+    month: RwSignal<YearMonth>,
+    draft_from: RwSignal<Option<SimpleDate>>,
+    draft_to: RwSignal<Option<SimpleDate>>,
+) -> impl IntoView {
+    let month_label = Signal::derive(move || {
+        format!(
+            "{} / {}",
+            t(month_name_key(month.get().month)),
+            month.get().year
+        )
+    });
+    let days = Signal::derive(move || calendar_cells(month.get()));
+
+    let select_date = move |date: SimpleDate| {
+        let from = draft_from.get_untracked();
+        let to = draft_to.get_untracked();
+
+        match (from, to) {
+            (None, _) | (Some(_), Some(_)) => {
+                draft_from.set(Some(date));
+                draft_to.set(None);
+            }
+            (Some(start), None) if date < start => {
+                draft_from.set(Some(date));
+                draft_to.set(Some(start));
+            }
+            (Some(start), None) if date == start => {
+                draft_from.set(Some(date));
+                draft_to.set(None);
+            }
+            (Some(_), None) => draft_to.set(Some(date)),
+        }
+    };
+
+    view! {
+        <div class="p-2.5 space-y-1">
+            <div class="grid grid-cols-5 items-center gap-x-2 mx-1 pb-2">
+                <div class="col-span-1">
+                    <button
+                        type="button"
+                        class="size-6 flex justify-center items-center text-content hover:bg-bg rounded-full disabled:opacity-50 disabled:pointer-events-none focus:outline-none focus:bg-bg"
+                        aria-label=move || t("date.previous_month")
+                        on:click=move |_| month.update(|m| *m = m.previous())
+                    >
+                        <Icon name=IconName::ChevronLeft class="size-4" />
+                    </button>
+                </div>
+
+                <div class="col-span-3 flex justify-center items-center">
+                    <span class="text-sm font-medium text-content whitespace-nowrap">{move || month_label.get()}</span>
+                </div>
+
+                <div class="col-span-1 flex justify-end">
+                    <button
+                        type="button"
+                        class="size-6 flex justify-center items-center text-content hover:bg-bg rounded-full disabled:opacity-50 disabled:pointer-events-none focus:outline-none focus:bg-bg"
+                        aria-label=move || t("date.next_month")
+                        on:click=move |_| month.update(|m| *m = m.next())
+                    >
+                        <Icon name=IconName::ChevronRight class="size-4" />
+                    </button>
+                </div>
+            </div>
+
+            <div class="grid grid-cols-7 pb-1">
+                <For
+                    each=week_labels
+                    key=|label| *label
+                    children=move |label| {
+                        view! {
+                            <span class="m-px block text-center text-[11px] text-muted">{label}</span>
+                        }
+                    }
+                />
+            </div>
+
+            <div class="grid grid-cols-7">
+                <For
+                    each=move || days.get()
+                    key=|cell| format!("{}-{}-{}", cell.date.year, cell.date.month, cell.date.day)
+                    children=move |cell| {
+                        let date = cell.date;
+                        let is_current_month = cell.current_month;
+                        let is_selected = move || {
+                            draft_from.get() == Some(date) || draft_to.get() == Some(date)
+                        };
+                        let in_range = move || {
+                            match (draft_from.get(), draft_to.get()) {
+                                (Some(start), Some(end)) => start < date && date < end,
+                                _ => false,
+                            }
+                        };
+
+                        view! {
+                            <div class=move || {
+                                if in_range() {
+                                    "bg-primary-soft"
+                                } else {
+                                    "bg-transparent"
+                                }
+                            }>
+                                <button
+                                    type="button"
+                                    class=move || {
+                                        let base = "m-px size-5 flex justify-center items-center border border-transparent text-xs rounded-full focus:outline-none disabled:opacity-40 disabled:pointer-events-none";
+                                        if is_selected() {
+                                            format!("{base} bg-primary text-on-primary hover:bg-primary-hover")
+                                        } else if is_current_month {
+                                            format!("{base} text-content hover:border-primary hover:text-primary focus:border-primary focus:text-primary")
+                                        } else {
+                                            format!("{base} text-muted opacity-50 hover:border-border")
+                                        }
+                                    }
+                                    on:click=move |_| select_date(date)
+                                >
+                                    {date.day}
+                                </button>
+                            </div>
+                        }
+                    }
+                />
+            </div>
+        </div>
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+struct SimpleDate {
+    year: i32,
+    month: u32,
+    day: u32,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct YearMonth {
+    year: i32,
+    month: u32,
+}
+
+impl YearMonth {
+    fn previous(self) -> Self {
+        if self.month == 1 {
+            Self {
+                year: self.year - 1,
+                month: 12,
+            }
+        } else {
+            Self {
+                year: self.year,
+                month: self.month - 1,
+            }
+        }
+    }
+
+    fn next(self) -> Self {
+        if self.month == 12 {
+            Self {
+                year: self.year + 1,
+                month: 1,
+            }
+        } else {
+            Self {
+                year: self.year,
+                month: self.month + 1,
+            }
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct CalendarCell {
+    date: SimpleDate,
+    current_month: bool,
+}
+
+fn initial_calendar_month(from: RwSignal<String>, to: RwSignal<String>) -> YearMonth {
+    parse_date(&from.get_untracked())
+        .or_else(|| parse_date(&to.get_untracked()))
+        .map(|date| YearMonth {
+            year: date.year,
+            month: date.month,
+        })
+        .unwrap_or_else(current_year_month)
+}
+
+fn current_year_month() -> YearMonth {
+    let now = js_sys::Date::new_0();
+    YearMonth {
+        year: now.get_full_year() as i32,
+        month: now.get_month() + 1,
+    }
+}
+
+fn parse_date(value: &str) -> Option<SimpleDate> {
+    let mut parts = value.split('-');
+    let year = parts.next()?.parse::<i32>().ok()?;
+    let month = parts.next()?.parse::<u32>().ok()?;
+    let day = parts.next()?.parse::<u32>().ok()?;
+    if parts.next().is_some() || !(1..=12).contains(&month) || day == 0 {
+        return None;
+    }
+    if day > days_in_month(year, month) {
+        return None;
+    }
+    Some(SimpleDate { year, month, day })
+}
+
+fn format_date(date: SimpleDate) -> String {
+    format!("{:04}-{:02}-{:02}", date.year, date.month, date.day)
+}
+
+fn calendar_cells(month: YearMonth) -> Vec<CalendarCell> {
+    let first_weekday = weekday_index_monday(month.year, month.month, 1);
+    let current_days = days_in_month(month.year, month.month);
+    let previous = month.previous();
+    let previous_days = days_in_month(previous.year, previous.month);
+
+    let mut cells = Vec::with_capacity(42);
+    for i in 0..first_weekday {
+        cells.push(CalendarCell {
+            date: SimpleDate {
+                year: previous.year,
+                month: previous.month,
+                day: previous_days - first_weekday + i + 1,
+            },
+            current_month: false,
+        });
+    }
+    for day in 1..=current_days {
+        cells.push(CalendarCell {
+            date: SimpleDate {
+                year: month.year,
+                month: month.month,
+                day,
+            },
+            current_month: true,
+        });
+    }
+    let next = month.next();
+    let mut day = 1;
+    while cells.len() < 42 {
+        cells.push(CalendarCell {
+            date: SimpleDate {
+                year: next.year,
+                month: next.month,
+                day,
+            },
+            current_month: false,
+        });
+        day += 1;
+    }
+    cells
+}
+
+fn week_labels() -> Vec<&'static str> {
+    vec![
+        t("date.week_monday"),
+        t("date.week_tuesday"),
+        t("date.week_wednesday"),
+        t("date.week_thursday"),
+        t("date.week_friday"),
+        t("date.week_saturday"),
+        t("date.week_sunday"),
+    ]
+}
+
+fn month_name_key(month: u32) -> &'static str {
+    match month {
+        1 => "date.month_january",
+        2 => "date.month_february",
+        3 => "date.month_march",
+        4 => "date.month_april",
+        5 => "date.month_may",
+        6 => "date.month_june",
+        7 => "date.month_july",
+        8 => "date.month_august",
+        9 => "date.month_september",
+        10 => "date.month_october",
+        11 => "date.month_november",
+        _ => "date.month_december",
+    }
+}
+
+fn days_in_month(year: i32, month: u32) -> u32 {
+    match month {
+        1 | 3 | 5 | 7 | 8 | 10 | 12 => 31,
+        4 | 6 | 9 | 11 => 30,
+        2 if is_leap_year(year) => 29,
+        2 => 28,
+        _ => 30,
+    }
+}
+
+fn is_leap_year(year: i32) -> bool {
+    (year % 4 == 0 && year % 100 != 0) || year % 400 == 0
+}
+
+/// Monday = 0, Sunday = 6.
+fn weekday_index_monday(year: i32, month: u32, day: u32) -> u32 {
+    let (year, month) = if month < 3 {
+        (year - 1, month + 12)
+    } else {
+        (year, month)
+    };
+    let k = year % 100;
+    let j = year / 100;
+    let h = (day as i32 + ((13 * (month as i32 + 1)) / 5) + k + (k / 4) + (j / 4) + (5 * j)) % 7;
+    ((h + 5) % 7) as u32
 }
 
 /// Shared classes for pager icon buttons (prev/next).
@@ -614,6 +959,8 @@ fn PaginationBar(
                 {move || t("repos.total").replace("{}", &total.get().to_string())}
             </span>
 
+            <span class="text-sm text-border select-none" aria-hidden="true">|</span>
+
             <div class="flex items-center gap-1.5">
                 <button
                     type="button"
@@ -638,7 +985,11 @@ fn PaginationBar(
                 </button>
             </div>
 
+            <span class="text-sm text-border select-none" aria-hidden="true">|</span>
+
             <PageSizeSelector />
+
+            <span class="text-sm text-border select-none" aria-hidden="true">|</span>
 
             <div class="flex items-center gap-1.5">
                 <span class="text-sm text-muted">

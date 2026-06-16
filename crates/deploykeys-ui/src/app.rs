@@ -153,7 +153,7 @@ pub fn App() -> impl IntoView {
             return;
         }
         signing_in.set(true);
-        let _sim = progress.begin_simulated();
+        let sim = progress.begin_simulated();
         error.set(None);
         spawn_local(async move {
             match api::sign_in_with_token(token.trim()).await {
@@ -164,8 +164,7 @@ pub fn App() -> impl IntoView {
                 Err(e) => error.set(Some(e)),
             }
             signing_in.set(false);
-            // The real progress stream from the backend ends at 100; no need to
-            // keep an extra simulated entry alive.
+            progress.end_simulated(&sim);
         });
     };
 
