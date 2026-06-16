@@ -1225,7 +1225,7 @@ fn PaginationBar(
 
     let goto_value = RwSignal::new(String::new());
 
-    let submit_goto = move |_| {
+    let submit_goto = move || {
         let Ok(n) = goto_value.get_untracked().trim().parse::<usize>() else {
             goto_value.set(String::new());
             return;
@@ -1282,7 +1282,11 @@ fn PaginationBar(
                     class="w-12 h-8 px-2 text-sm text-center rounded-md border border-border bg-bg text-content focus:outline-none focus:ring-1 focus:ring-primary"
                     prop:value=move || goto_value.get()
                     on:input=move |ev| goto_value.set(event_target_value(&ev))
-                    on:keydown=submit_goto
+                    on:keydown=move |ev: web_sys::KeyboardEvent| {
+                        if ev.key() == "Enter" {
+                            submit_goto();
+                        }
+                    }
                 />
                 <span class="text-sm text-muted">
                     {move || t("repos.go_to_page_after")}

@@ -22,6 +22,7 @@ pub enum IconName {
     Monitor,
     Moon,
     QuickRoutes,
+    RepositoryList,
     Server,
     SettingsPlaceholder,
     SignOut,
@@ -48,6 +49,7 @@ impl IconName {
             IconName::Monitor => "assets/images/svg/icons/monitor.svg",
             IconName::Moon => "assets/images/svg/icons/moon.svg",
             IconName::QuickRoutes => "assets/images/svg/icons/quick-routes.svg",
+            IconName::RepositoryList => "assets/images/svg/icons/repository-list.svg",
             IconName::Server => "assets/images/svg/icons/server.svg",
             IconName::SettingsPlaceholder => "assets/images/svg/icons/settings-placeholder.svg",
             IconName::SignOut => "assets/images/svg/icons/sign-out.svg",
@@ -56,23 +58,64 @@ impl IconName {
             IconName::Sun => "assets/images/svg/icons/sun.svg",
         }
     }
+
+    const fn svg(self) -> &'static str {
+        match self {
+            IconName::Brand => include_str!("../assets/images/svg/icons/brand.svg"),
+            IconName::Check => include_str!("../assets/images/svg/icons/check.svg"),
+            IconName::ChevronLeft => include_str!("../assets/images/svg/icons/chevron-left.svg"),
+            IconName::ChevronRight => include_str!("../assets/images/svg/icons/chevron-right.svg"),
+            IconName::Close => include_str!("../assets/images/svg/icons/close.svg"),
+            IconName::Copy => include_str!("../assets/images/svg/icons/copy.svg"),
+            IconName::Delete => include_str!("../assets/images/svg/icons/delete.svg"),
+            IconName::Edit => include_str!("../assets/images/svg/icons/edit.svg"),
+            IconName::Folder => include_str!("../assets/images/svg/icons/folder.svg"),
+            IconName::Github => include_str!("../assets/images/svg/icons/github.svg"),
+            IconName::Globe => include_str!("../assets/images/svg/icons/globe.svg"),
+            IconName::Key => include_str!("../assets/images/svg/icons/key.svg"),
+            IconName::Monitor => include_str!("../assets/images/svg/icons/monitor.svg"),
+            IconName::Moon => include_str!("../assets/images/svg/icons/moon.svg"),
+            IconName::QuickRoutes => include_str!("../assets/images/svg/icons/quick-routes.svg"),
+            IconName::RepositoryList => {
+                include_str!("../assets/images/svg/icons/repository-list.svg")
+            }
+            IconName::Server => include_str!("../assets/images/svg/icons/server.svg"),
+            IconName::SettingsPlaceholder => {
+                include_str!("../assets/images/svg/icons/settings-placeholder.svg")
+            }
+            IconName::SignOut => include_str!("../assets/images/svg/icons/sign-out.svg"),
+            IconName::SidebarToggle => {
+                include_str!("../assets/images/svg/icons/sidebar-toggle.svg")
+            }
+            IconName::SidebarToggleFilled => {
+                include_str!("../assets/images/svg/icons/sidebar-toggle-filled.svg")
+            }
+            IconName::Sun => include_str!("../assets/images/svg/icons/sun.svg"),
+        }
+    }
 }
 
 #[component]
 pub fn Icon(name: IconName, #[prop(into, optional)] class: String) -> impl IntoView {
-    let base_class = "shrink-0 inline-block";
+    let base_class = "shrink-0 inline-flex items-center justify-center";
     let combined_class = if class.is_empty() {
         base_class.to_string()
     } else {
         format!("{} {}", base_class, class)
     };
-    let src = name.src();
-    let style = format!(
-        "background-color: currentColor; mask: url(\"{src}\") center / contain no-repeat; -webkit-mask: url(\"{src}\") center / contain no-repeat;"
-    );
+    let svg = name
+        .svg()
+        .replace(
+            "<svg ",
+            "<svg style=\"width:100%;height:100%;display:block;\" ",
+        )
+        .replace("#fff", "currentColor")
+        .replace("#FFF", "currentColor")
+        .replace("#ffffff", "currentColor")
+        .replace("#FFFFFF", "currentColor");
 
     view! {
-        <span class=combined_class style=style aria-hidden="true"></span>
+        <span class=combined_class inner_html=svg aria-hidden="true"></span>
     }
 }
 

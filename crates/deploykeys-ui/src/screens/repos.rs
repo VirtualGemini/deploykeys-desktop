@@ -1,8 +1,8 @@
 //! Repositories list screen.
 //!
-//! Renders the locally-synced repositories as a flat, GitHub-like list with a
-//! name search box and visibility + language filters. Filtering is entirely
-//! client-side over the synced rows; "Refresh" re-syncs from GitHub and reloads.
+//! Renders the locally-synced repositories as a table with a name search box
+//! and visibility + language filters. Filtering is entirely client-side over
+//! the synced rows; "Refresh" re-syncs from GitHub and reloads.
 //! The list is gated on being signed in: signing out clears it, and a
 //! signed-out "Refresh" routes to the sign-in screen instead of erroring.
 
@@ -12,9 +12,19 @@ use crate::icons::{Icon, IconName};
 use crate::page_size::page_size;
 use crate::progress::ProgressHandle;
 use leptos::*;
+use wasm_bindgen::JsCast;
 use wasm_bindgen_futures::spawn_local;
 /// Sentinel value for the "no language" bucket in the language filter.
 const OTHER: &str = "\u{1}other";
+
+#[derive(Clone, Copy)]
+struct TableDragState {
+    pointer_id: i32,
+    start_x: i32,
+    start_y: i32,
+    scroll_left: i32,
+    scroll_top: i32,
+}
 
 #[component]
 pub fn Repos(
@@ -23,6 +33,8 @@ pub fn Repos(
     on_sign_in_hint: Callback<()>,
 ) -> impl IntoView {
     let progress = ProgressHandle::expect();
+    let table_scroll_ref = NodeRef::<html::Div>::new();
+    let table_drag = RwSignal::new(None::<TableDragState>);
     let repos = RwSignal::new(Vec::<Repo>::new());
     let loading = RwSignal::new(false);
     let syncing = RwSignal::new(false);
@@ -181,14 +193,6 @@ pub fn Repos(
         });
     });
 
-    let open_repo = move |url: String| {
-        let sim = progress.begin_simulated();
-        spawn_local(async move {
-            let _ = api::open_url(&url).await;
-            progress.end_simulated(&sim);
-        });
-    };
-
     let set_query = move |value: String| {
         query.set(value);
         page.set(1);
@@ -200,6 +204,13 @@ pub fn Repos(
     let set_language = move |value: String| {
         language.set(value);
         page.set(1);
+    };
+    let clear_table_drag = move |pointer_id: i32| {
+        if let Some(drag) = table_drag.get_untracked() {
+            if drag.pointer_id == pointer_id {
+                table_drag.set(None);
+            }
+        }
     };
 
     view! {
@@ -243,6 +254,7 @@ pub fn Repos(
                     <FilterDropdown
                         options=language_options
                         selected=Signal::derive(move || language.get())
+                        fixed_height=true
                         on_select=Callback::new(set_language)
                     />
                 </div>
@@ -265,53 +277,201 @@ pub fn Repos(
                             when=move || !paged.get().is_empty()
                             fallback=move || view! { <p class="text-sm text-muted">{move || t("repos.no_match")}</p> }
                         >
-                            <div class="flex flex-col gap-4 flex-1 min-h-0">
-                            <ul class="flex flex-col gap-2 flex-1 overflow-y-auto min-h-0">
-                                <For
-                                    each=move || paged.get()
-                                    key=|r| r.full_name.clone()
-                                    children=move |r| {
-                                        let Repo { full_name, private, language, archived, html_url, .. } = r;
-                                        view! {
-                                            <li
-                                                class="flex items-center gap-3 py-3 px-4 rounded-lg border border-border bg-surface hover:bg-bg cursor-pointer"
-                                                on:click={
-                                                    let url = html_url.clone();
-                                                    move |_| open_repo(url.clone())
+                            <div class="flex flex-col flex-1 min-h-0">
+                                <div class="relative flex-1 min-h-0 flex flex-col">
+                                    <div class="min-h-0 flex-1 rounded-lg border border-border bg-surface overflow-hidden">
+                                        <div
+                                            node_ref=table_scroll_ref
+                                            class="h-full overflow-x-auto overflow-y-auto min-h-0 cursor-grab"
+                                            class:cursor-grabbing=move || table_drag.get().is_some()
+                                            class:select-none=move || table_drag.get().is_some()
+                                            style="touch-action: none;"
+                                            on:pointerdown=move |ev| {
+                                                if ev.pointer_type() == "mouse" && ev.button() != 0 {
+                                                    return;
                                                 }
-                                            >
-                                                <span class="font-medium text-content truncate">{full_name}</span>
-                                                <span class="shrink-0 text-[11px] py-0.5 px-2 rounded-full border border-border text-muted">
-                                                    {move || if private { t("repos.private") } else { t("repos.public") }}
-                                                </span>
-                                                {language.map(|l| {
-                                                    let dot = format!("background-color: {}", language_color(&l));
-                                                    view! {
-                                                        <span class="shrink-0 inline-flex items-center gap-1.5 text-xs text-muted">
-                                                            <span class="inline-block size-2.5 rounded-full" style=dot></span>
-                                                            {l}
-                                                        </span>
+
+                                                let started_on_interactive = ev
+                                                    .target()
+                                                    .and_then(|target| target.dyn_into::<web_sys::Element>().ok())
+                                                    .and_then(|element| {
+                                                        element
+                                                            .closest("button, input, select, textarea, a, [data-no-drag-scroll]")
+                                                            .ok()
+                                                            .flatten()
+                                                    })
+                                                    .is_some();
+                                                if started_on_interactive {
+                                                    return;
+                                                }
+
+                                                if let Some(scroller) = table_scroll_ref.get() {
+                                                    let _ = scroller.set_pointer_capture(ev.pointer_id());
+                                                    table_drag.set(Some(TableDragState {
+                                                        pointer_id: ev.pointer_id(),
+                                                        start_x: ev.client_x(),
+                                                        start_y: ev.client_y(),
+                                                        scroll_left: scroller.scroll_left(),
+                                                        scroll_top: scroller.scroll_top(),
+                                                    }));
+                                                    ev.prevent_default();
+                                                }
+                                            }
+                                            on:pointermove=move |ev| {
+                                                if let Some(drag) = table_drag.get_untracked() {
+                                                    if drag.pointer_id != ev.pointer_id() {
+                                                        return;
                                                     }
-                                                })}
-                                                {archived.then(|| view! {
-                                                    <span class="shrink-0 text-[11px] py-0.5 px-2 rounded-full border border-border text-muted">
-                                                        {move || t("repos.archived")}
-                                                    </span>
-                                                })}
-                                            </li>
-                                        }
-                                    }
+                                                    if let Some(scroller) = table_scroll_ref.get() {
+                                                        let delta_x = ev.client_x() - drag.start_x;
+                                                        let delta_y = ev.client_y() - drag.start_y;
+                                                        scroller.set_scroll_left(drag.scroll_left - delta_x);
+                                                        scroller.set_scroll_top(drag.scroll_top - delta_y);
+                                                        ev.prevent_default();
+                                                    }
+                                                }
+                                            }
+                                            on:pointerup=move |ev| clear_table_drag(ev.pointer_id())
+                                            on:pointercancel=move |ev| clear_table_drag(ev.pointer_id())
+                                        >
+                                            <table class="min-w-[46rem] w-full table-fixed border-collapse text-sm">
+                                                <thead class="sticky top-0 z-10 bg-surface">
+                                                    <tr class="border-b border-border">
+                                                        <th class="w-[20rem] min-w-[20rem] text-start font-medium text-muted px-3 py-2 whitespace-nowrap align-middle">
+                                                            {move || t("repos.repository")}
+                                                        </th>
+                                                        <th class="w-[8rem] min-w-[8rem] text-start font-medium text-muted px-3 py-2 whitespace-nowrap align-middle">
+                                                            {move || t("repos.visibility")}
+                                                        </th>
+                                                        <th class="w-[10rem] min-w-[10rem] text-start font-medium text-muted px-3 py-2 whitespace-nowrap align-middle">
+                                                            {move || t("repos.language")}
+                                                        </th>
+                                                        <th class="sticky right-0 z-20 w-[8rem] min-w-[8rem] bg-surface text-start font-medium text-muted px-3 py-2 whitespace-nowrap align-middle relative">
+                                                            <span class="pointer-events-none absolute inset-y-0 left-0 w-px bg-border"></span>
+                                                            {move || t("repos.actions")}
+                                                        </th>
+                                                    </tr>
+                                                </thead>
+                                                <tbody>
+                                                    <For
+                                                        each=move || paged.get()
+                                                        key=|r| r.full_name.clone()
+                                                        children=move |r| {
+                                                            let Repo {
+                                                                full_name,
+                                                                private,
+                                                                language,
+                                                                ..
+                                                            } = r;
+                                                            let language_text = language.unwrap_or_else(|| "—".to_string());
+                                                            view! {
+                                                                <tr class="group border-b border-border last:border-b-0 hover:bg-bg align-middle">
+                                                                    <td class="w-[20rem] min-w-[20rem] max-w-[20rem] px-3 py-2 align-middle">
+                                                                        <TruncatedCellText
+                                                                            display=full_name.clone()
+                                                                            tooltip=full_name
+                                                                            class="font-medium text-content"
+                                                                        />
+                                                                    </td>
+                                                                    <td class="w-[8rem] min-w-[8rem] px-3 py-2 whitespace-nowrap align-middle">
+                                                                        <span class="inline-flex items-center text-[11px] py-0.5 px-2 rounded-full border border-border text-muted">
+                                                                            {move || if private { t("repos.private") } else { t("repos.public") }}
+                                                                        </span>
+                                                                    </td>
+                                                                    <td class="w-[10rem] min-w-[10rem] max-w-[10rem] px-3 py-2 align-middle">
+                                                                        <div class="inline-flex max-w-full items-center gap-1.5 text-muted">
+                                                                            {language_text.ne("—").then({
+                                                                                let language_text = language_text.clone();
+                                                                                move || {
+                                                                                    let dot = format!("background-color: {}", language_color(&language_text));
+                                                                                    view! { <span class="inline-block size-2.5 shrink-0 rounded-full" style=dot></span> }
+                                                                                }
+                                                                            })}
+                                                                            <TruncatedCellText
+                                                                                display=language_text.clone()
+                                                                                tooltip=language_text
+                                                                                class="text-muted"
+                                                                            />
+                                                                        </div>
+                                                                    </td>
+                                                                    <td class="sticky right-0 z-[1] min-w-[8rem] bg-surface px-3 py-2 group-hover:bg-bg relative align-middle">
+                                                                        <span class="pointer-events-none absolute inset-y-0 left-0 w-px bg-border"></span>
+                                                                        <div class="inline-flex min-w-max items-center gap-1.5">
+                                                                            <button
+                                                                                type="button"
+                                                                                class="inline-flex items-center justify-center size-8 rounded-md text-content hover:bg-primary-soft dark:hover:bg-primary-soft/60 focus:outline-none"
+                                                                            >
+                                                                                <Icon name=IconName::RepositoryList class="size-5" />
+                                                                            </button>
+                                                                        </div>
+                                                                    </td>
+                                                                </tr>
+                                                            }
+                                                        }
+                                                    />
+                                                </tbody>
+                                            </table>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="shrink-0 h-4" aria-hidden="true"></div>
+                                <PaginationBar
+                                    page=page
+                                    page_count=page_count
+                                    total=filtered_count
                                 />
-                            </ul>
-                            <PaginationBar
-                                page=page
-                                page_count=page_count
-                                total=filtered_count
-                            />
                             </div>
                         </Show>
                     </Show>
                 </Show>
+            </Show>
+        </div>
+    }
+}
+
+#[component]
+fn TruncatedCellText(
+    #[prop(into)] display: String,
+    #[prop(optional, into)] tooltip: String,
+    #[prop(optional, into)] class: String,
+) -> impl IntoView {
+    let text_ref = NodeRef::<html::Span>::new();
+    let bubble_open = RwSignal::new(false);
+    let bubble = if tooltip.is_empty() {
+        display.clone()
+    } else {
+        tooltip
+    };
+    let show_bubble = !bubble.trim().is_empty() && bubble != "—";
+    let title_text = if show_bubble {
+        bubble.clone()
+    } else {
+        String::new()
+    };
+    let bubble_text = bubble.clone();
+    let update_bubble = move || {
+        let truncated = text_ref
+            .get()
+            .map(|element| element.scroll_width() > element.client_width())
+            .unwrap_or(false);
+        bubble_open.set(show_bubble && truncated);
+    };
+
+    view! {
+        <div class="group/cell relative flex max-w-full">
+            <span
+                node_ref=text_ref
+                class=format!("block max-w-full truncate whitespace-nowrap {class}")
+                title=title_text
+                on:mouseenter=move |_| update_bubble()
+                on:mouseleave=move |_| bubble_open.set(false)
+            >
+                {display}
+            </span>
+            <Show when=move || bubble_open.get()>
+                <div class="pointer-events-none absolute left-1/2 top-0 z-30 hidden w-max max-w-[min(28rem,calc(100vw-4rem))] -translate-x-1/2 -translate-y-[calc(100%+0.5rem)] whitespace-normal break-words rounded-lg border border-border bg-surface px-3 py-2 text-left text-xs leading-5 text-content shadow-xl group-hover/cell:block">
+                    {bubble_text.clone()}
+                </div>
             </Show>
         </div>
     }
@@ -324,6 +484,7 @@ pub fn Repos(
 fn FilterDropdown(
     #[prop(into)] options: Signal<Vec<(String, String)>>,
     #[prop(into)] selected: Signal<String>,
+    #[prop(optional)] fixed_height: bool,
     on_select: Callback<String>,
 ) -> impl IntoView {
     let open = RwSignal::new(false);
@@ -338,6 +499,11 @@ fn FilterDropdown(
             .map(|(_, display)| display)
             .unwrap_or_default()
     });
+    let panel_class = if fixed_height {
+        "absolute start-0 mt-1 z-50 w-max h-64 overflow-y-auto p-1 bg-surface border border-border rounded-xl shadow-xl"
+    } else {
+        "absolute start-0 mt-1 z-50 w-max max-h-80 overflow-y-auto p-1 bg-surface border border-border rounded-xl shadow-xl"
+    };
 
     view! {
         <div class="relative">
@@ -353,7 +519,7 @@ fn FilterDropdown(
             <Show when=move || open.get()>
                 <div class="fixed inset-0 z-40" on:click=move |_| open.set(false)></div>
                 // Panel: content-width, rows half the height of the language switcher.
-                <div class="absolute start-0 mt-1 z-50 w-max max-h-80 overflow-y-auto p-1 bg-surface border border-border rounded-xl shadow-xl">
+                <div class=panel_class>
                     <For
                         each=move || options.get()
                         key=|(value, _)| value.clone()
@@ -417,7 +583,7 @@ fn PaginationBar(
 
     let goto_value = RwSignal::new(String::new());
 
-    let submit_goto = move |_| {
+    let submit_goto = move || {
         let Ok(n) = goto_value.get_untracked().trim().parse::<usize>() else {
             goto_value.set(String::new());
             return;
@@ -474,7 +640,11 @@ fn PaginationBar(
                     class="w-12 h-8 px-2 text-sm text-center rounded-md border border-border bg-bg text-content focus:outline-none focus:ring-1 focus:ring-primary"
                     prop:value=move || goto_value.get()
                     on:input=move |ev| goto_value.set(event_target_value(&ev))
-                    on:keydown=submit_goto
+                    on:keydown=move |ev: web_sys::KeyboardEvent| {
+                        if ev.key() == "Enter" {
+                            submit_goto();
+                        }
+                    }
                 />
                 <span class="text-sm text-muted">
                     {move || t("repos.go_to_page_after")}
