@@ -399,9 +399,27 @@ pub fn Repos(
                                                                         <div class="inline-flex min-w-max items-center gap-1.5">
                                                                             <button
                                                                                 type="button"
+                                                                                title=move || t("repos.clone_repository")
+                                                                                aria-label=move || t("repos.clone_repository")
+                                                                                class="inline-flex items-center justify-center size-8 rounded-md text-primary hover:bg-primary-soft focus:outline-none"
+                                                                            >
+                                                                                <Icon name=IconName::Download class="size-4" />
+                                                                            </button>
+                                                                            <button
+                                                                                type="button"
+                                                                                title=move || t("repos.bind_key")
+                                                                                aria-label=move || t("repos.bind_key")
                                                                                 class="inline-flex items-center justify-center size-8 rounded-md text-content hover:bg-primary-soft dark:hover:bg-primary-soft/60 focus:outline-none"
                                                                             >
-                                                                                <Icon name=IconName::RepositoryList class="size-5" />
+                                                                                <Icon name=IconName::Key class="size-4" />
+                                                                            </button>
+                                                                            <button
+                                                                                type="button"
+                                                                                title=move || t("repos.more_actions")
+                                                                                aria-label=move || t("repos.more_actions")
+                                                                                class="inline-flex items-center justify-center size-8 rounded-md text-content hover:bg-primary-soft dark:hover:bg-primary-soft/60 focus:outline-none"
+                                                                            >
+                                                                                <Icon name=IconName::MoreVertical class="size-4" />
                                                                             </button>
                                                                         </div>
                                                                     </td>

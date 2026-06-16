@@ -1390,9 +1390,18 @@ fn CreateKeyDialog(open: RwSignal<bool>, on_created: Callback<()>) -> impl IntoV
     let error = RwSignal::new(None::<String>);
     let algorithm_options = Signal::derive(move || {
         vec![
-            ("ed25519".to_string(), t("keys.algorithm_ed25519").to_string()),
-            ("rsa2048".to_string(), t("keys.algorithm_rsa2048").to_string()),
-            ("rsa4096".to_string(), t("keys.algorithm_rsa4096").to_string()),
+            (
+                "ed25519".to_string(),
+                t("keys.algorithm_ed25519").to_string(),
+            ),
+            (
+                "rsa2048".to_string(),
+                t("keys.algorithm_rsa2048").to_string(),
+            ),
+            (
+                "rsa4096".to_string(),
+                t("keys.algorithm_rsa4096").to_string(),
+            ),
         ]
     });
 

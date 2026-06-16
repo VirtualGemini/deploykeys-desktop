@@ -14,6 +14,7 @@ pub enum IconName {
     Close,
     Copy,
     Delete,
+    Download,
     Edit,
     Folder,
     Github,
@@ -21,8 +22,8 @@ pub enum IconName {
     Key,
     Monitor,
     Moon,
+    MoreVertical,
     QuickRoutes,
-    RepositoryList,
     Server,
     SettingsPlaceholder,
     SignOut,
@@ -41,6 +42,7 @@ impl IconName {
             IconName::Close => "assets/images/svg/icons/close.svg",
             IconName::Copy => "assets/images/svg/icons/copy.svg",
             IconName::Delete => "assets/images/svg/icons/delete.svg",
+            IconName::Download => "assets/images/svg/icons/download.svg",
             IconName::Edit => "assets/images/svg/icons/edit.svg",
             IconName::Folder => "assets/images/svg/icons/folder.svg",
             IconName::Github => "assets/images/svg/icons/github.svg",
@@ -48,8 +50,8 @@ impl IconName {
             IconName::Key => "assets/images/svg/icons/key.svg",
             IconName::Monitor => "assets/images/svg/icons/monitor.svg",
             IconName::Moon => "assets/images/svg/icons/moon.svg",
+            IconName::MoreVertical => "assets/images/svg/icons/more-vertical.svg",
             IconName::QuickRoutes => "assets/images/svg/icons/quick-routes.svg",
-            IconName::RepositoryList => "assets/images/svg/icons/repository-list.svg",
             IconName::Server => "assets/images/svg/icons/server.svg",
             IconName::SettingsPlaceholder => "assets/images/svg/icons/settings-placeholder.svg",
             IconName::SignOut => "assets/images/svg/icons/sign-out.svg",
@@ -68,6 +70,7 @@ impl IconName {
             IconName::Close => include_str!("../assets/images/svg/icons/close.svg"),
             IconName::Copy => include_str!("../assets/images/svg/icons/copy.svg"),
             IconName::Delete => include_str!("../assets/images/svg/icons/delete.svg"),
+            IconName::Download => include_str!("../assets/images/svg/icons/download.svg"),
             IconName::Edit => include_str!("../assets/images/svg/icons/edit.svg"),
             IconName::Folder => include_str!("../assets/images/svg/icons/folder.svg"),
             IconName::Github => include_str!("../assets/images/svg/icons/github.svg"),
@@ -75,10 +78,8 @@ impl IconName {
             IconName::Key => include_str!("../assets/images/svg/icons/key.svg"),
             IconName::Monitor => include_str!("../assets/images/svg/icons/monitor.svg"),
             IconName::Moon => include_str!("../assets/images/svg/icons/moon.svg"),
+            IconName::MoreVertical => include_str!("../assets/images/svg/icons/more-vertical.svg"),
             IconName::QuickRoutes => include_str!("../assets/images/svg/icons/quick-routes.svg"),
-            IconName::RepositoryList => {
-                include_str!("../assets/images/svg/icons/repository-list.svg")
-            }
             IconName::Server => include_str!("../assets/images/svg/icons/server.svg"),
             IconName::SettingsPlaceholder => {
                 include_str!("../assets/images/svg/icons/settings-placeholder.svg")
