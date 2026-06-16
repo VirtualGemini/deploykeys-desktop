@@ -67,6 +67,7 @@ pub async fn sign_out() -> Result<(), String> {
 /// A repository as shown in the Repos list. Mirrors the backend `RepoDto`.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 pub struct Repo {
+    pub id: i64,
     pub full_name: String,
     pub owner: String,
     pub name: String,
@@ -183,4 +184,24 @@ pub async fn ssh_key_files_exist(id: i64) -> Result<bool, String> {
         id: i64,
     }
     invoke("ssh_key_files_exist", &Args { id }).await
+}
+
+/// Bind an existing local SSH key to a GitHub repository as a deploy key.
+pub async fn bind_deploy_key(repo_id: i64, ssh_key_id: i64, writable: bool) -> Result<(), String> {
+    #[derive(Serialize)]
+    #[serde(rename_all = "camelCase")]
+    struct Args {
+        repo_id: i64,
+        ssh_key_id: i64,
+        writable: bool,
+    }
+    invoke(
+        "bind_deploy_key",
+        &Args {
+            repo_id,
+            ssh_key_id,
+            writable,
+        },
+    )
+    .await
 }

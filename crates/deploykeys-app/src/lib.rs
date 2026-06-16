@@ -7,9 +7,9 @@
 
 use deploykeys_core::credentials::CredentialStore;
 use deploykeys_core::db::Database;
-use deploykeys_core::models::{Account, KeyAlgorithm};
+use deploykeys_core::models::{Account, DeployKeyPermission, KeyAlgorithm};
 use deploykeys_core::progress::{OperationId, ProgressReporter};
-use deploykeys_core::services::{AuthService, RepoSyncService, SshKeyService};
+use deploykeys_core::services::{AuthService, KeyBindingService, RepoSyncService, SshKeyService};
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager, State};
 
@@ -67,6 +67,7 @@ struct AccountDto {
 /// ids and keyring/permission snapshots the UI has no use for.
 #[derive(Serialize)]
 struct RepoDto {
+    id: i64,
     full_name: String,
     owner: String,
     name: String,
@@ -238,6 +239,7 @@ async fn list_repositories(state: State<'_, AppState>) -> Result<Vec<RepoDto>, S
     Ok(repos
         .into_iter()
         .map(|r| RepoDto {
+            id: r.id,
             full_name: r.full_name,
             owner: r.owner,
             name: r.name,
@@ -352,6 +354,44 @@ async fn ssh_key_files_exist(state: State<'_, AppState>, id: i64) -> Result<bool
     service.key_files_exist(id).await.map_err(|e| e.to_string())
 }
 
+/// Upload an existing local SSH key's public key to GitHub as a deploy key,
+/// persist the binding, and maintain the per-repository ~/.ssh/config host.
+#[tauri::command]
+async fn bind_deploy_key(
+    state: State<'_, AppState>,
+    repo_id: i64,
+    ssh_key_id: i64,
+    writable: bool,
+) -> Result<(), String> {
+    let repo = state
+        .db
+        .repositories()
+        .find_by_id(repo_id)
+        .await
+        .map_err(|e| e.to_string())?
+        .ok_or("Repository not found")?;
+    let account = state
+        .db
+        .accounts()
+        .find_by_id(repo.account_id)
+        .await
+        .map_err(|e| e.to_string())?
+        .ok_or("Account not found")?;
+    let token = resolve_token(&state, &account).await?;
+    let permission = if writable {
+        DeployKeyPermission::ReadWrite
+    } else {
+        DeployKeyPermission::ReadOnly
+    };
+
+    let service = KeyBindingService::new(state.db.clone()).map_err(|e| e.to_string())?;
+    service
+        .upload_existing_key(repo_id, ssh_key_id, &token, permission)
+        .await
+        .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
 fn ssh_key_dto(key: deploykeys_core::models::SshKey) -> SshKeyDto {
     SshKeyDto {
         id: key.id,
@@ -430,6 +470,7 @@ pub fn run() {
             update_ssh_key,
             get_public_key_content,
             ssh_key_files_exist,
+            bind_deploy_key,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

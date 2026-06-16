@@ -6,7 +6,7 @@
 //! The list is gated on being signed in: signing out clears it, and a
 //! signed-out "Refresh" routes to the sign-in screen instead of erroring.
 
-use crate::api::{self, Repo};
+use crate::api::{self, Repo, SshKey};
 use crate::i18n::t;
 use crate::icons::{Icon, IconName};
 use crate::page_size::page_size;
@@ -39,6 +39,13 @@ pub fn Repos(
     let loading = RwSignal::new(false);
     let syncing = RwSignal::new(false);
     let error = RwSignal::new(None::<String>);
+    let bind_repo = RwSignal::new(None::<Repo>);
+    let bind_keys = RwSignal::new(Vec::<SshKey>::new());
+    let bind_keys_loading = RwSignal::new(false);
+    let bind_submitting = RwSignal::new(false);
+    let bind_error = RwSignal::new(None::<String>);
+    let bind_selected_key = RwSignal::new(None::<i64>);
+    let bind_writable = RwSignal::new(false);
 
     let query = RwSignal::new(String::new());
     // String filter values: "" = all; for language, OTHER = repos with no language.
@@ -212,6 +219,51 @@ pub fn Repos(
             }
         }
     };
+    let open_bind_dialog = move |repo: Repo| {
+        bind_repo.set(Some(repo));
+        bind_keys.set(Vec::new());
+        bind_selected_key.set(None);
+        bind_writable.set(false);
+        bind_error.set(None);
+        bind_keys_loading.set(true);
+        let sim = progress.begin_simulated();
+        spawn_local(async move {
+            match api::list_ssh_keys().await {
+                Ok(list) => {
+                    bind_selected_key.set(list.first().map(|key| key.id));
+                    bind_keys.set(list);
+                }
+                Err(e) => bind_error.set(Some(e)),
+            }
+            bind_keys_loading.set(false);
+            progress.end_simulated(&sim);
+        });
+    };
+    let submit_bind_key = move || {
+        if bind_submitting.get_untracked() {
+            return;
+        }
+        let Some(repo) = bind_repo.get_untracked() else {
+            return;
+        };
+        let Some(ssh_key_id) = bind_selected_key.get_untracked() else {
+            bind_error.set(Some(t("repos.bind_key_required").to_string()));
+            return;
+        };
+
+        bind_submitting.set(true);
+        bind_error.set(None);
+        let writable = bind_writable.get_untracked();
+        let sim = progress.begin_simulated();
+        spawn_local(async move {
+            match api::bind_deploy_key(repo.id, ssh_key_id, writable).await {
+                Ok(()) => bind_repo.set(None),
+                Err(e) => bind_error.set(Some(e)),
+            }
+            bind_submitting.set(false);
+            progress.end_simulated(&sim);
+        });
+    };
 
     view! {
         <div class="flex flex-col gap-5 h-full">
@@ -357,6 +409,7 @@ pub fn Repos(
                                                         each=move || paged.get()
                                                         key=|r| r.full_name.clone()
                                                         children=move |r| {
+                                                            let repo_for_bind = r.clone();
                                                             let Repo {
                                                                 full_name,
                                                                 private,
@@ -410,6 +463,7 @@ pub fn Repos(
                                                                                 title=move || t("repos.bind_key")
                                                                                 aria-label=move || t("repos.bind_key")
                                                                                 class="inline-flex items-center justify-center size-8 rounded-md text-content hover:bg-primary-soft dark:hover:bg-primary-soft/60 focus:outline-none"
+                                                                                on:click=move |_| open_bind_dialog(repo_for_bind.clone())
                                                                             >
                                                                                 <Icon name=IconName::Key class="size-4" />
                                                                             </button>
@@ -443,7 +497,181 @@ pub fn Repos(
                     </Show>
                 </Show>
             </Show>
+            <BindKeyDialog
+                repo=bind_repo
+                keys=bind_keys
+                loading=bind_keys_loading
+                submitting=bind_submitting
+                error=bind_error
+                selected_key=bind_selected_key
+                writable=bind_writable
+                on_submit=Callback::new(move |_| submit_bind_key())
+            />
         </div>
+    }
+}
+
+#[component]
+fn BindKeyDialog(
+    repo: RwSignal<Option<Repo>>,
+    keys: RwSignal<Vec<SshKey>>,
+    loading: RwSignal<bool>,
+    submitting: RwSignal<bool>,
+    error: RwSignal<Option<String>>,
+    selected_key: RwSignal<Option<i64>>,
+    writable: RwSignal<bool>,
+    on_submit: Callback<()>,
+) -> impl IntoView {
+    let close = move || {
+        if !submitting.get_untracked() {
+            repo.set(None);
+        }
+    };
+    let repo_name = Signal::derive(move || {
+        repo.get()
+            .map(|repo| repo.full_name)
+            .unwrap_or_else(String::new)
+    });
+
+    view! {
+        <Show when=move || repo.get().is_some()>
+            <div
+                class="fixed inset-0 z-[100] bg-black/50 backdrop-blur-sm flex items-center justify-center px-4"
+                on:click=move |_| close()
+            >
+                <div
+                    class="w-full max-w-xl bg-surface border border-border rounded-xl shadow-2xl overflow-hidden"
+                    on:click=|ev| ev.stop_propagation()
+                >
+                    <div class="flex items-start justify-between gap-4 px-6 py-5">
+                        <div class="min-w-0">
+                            <h2 class="text-base font-semibold text-content">{move || t("repos.bind_dialog_title")}</h2>
+                            <p class="mt-1 text-sm text-muted truncate">{move || repo_name.get()}</p>
+                        </div>
+                        <button
+                            type="button"
+                            title=move || t("common.cancel")
+                            aria-label=move || t("common.cancel")
+                            class="inline-flex items-center justify-center size-8 rounded-md text-muted hover:bg-bg hover:text-content focus:outline-none disabled:opacity-50"
+                            prop:disabled=move || submitting.get()
+                            on:click=move |_| close()
+                        >
+                            <Icon name=IconName::Close class="size-4" />
+                        </button>
+                    </div>
+
+                    <div class="px-6 pb-5 space-y-4">
+                        <Show when=move || error.get().is_some()>
+                            <div class="w-full p-3 text-sm rounded-lg border border-red-200 bg-red-50 text-red-700 dark:border-red-900 dark:bg-red-950 dark:text-red-300">
+                                {move || error.get().unwrap_or_default()}
+                            </div>
+                        </Show>
+
+                        <div>
+                            <div class="mb-2 text-sm font-medium text-content">{move || t("repos.bind_dialog_key_label")}</div>
+                            <Show
+                                when=move || !loading.get()
+                                fallback=move || view! { <div class="h-24 rounded-lg border border-border bg-bg"></div> }
+                            >
+                                <Show
+                                    when=move || !keys.get().is_empty()
+                                    fallback=move || view! {
+                                        <p class="text-sm text-muted rounded-lg border border-border bg-bg px-3 py-4">
+                                            {move || t("repos.bind_dialog_no_keys")}
+                                        </p>
+                                    }
+                                >
+                                    <div class="max-h-64 overflow-y-auto rounded-lg border border-border bg-bg p-1">
+                                        <For
+                                            each=move || keys.get()
+                                            key=|key| key.id
+                                            children=move |key| {
+                                                let key_id = key.id;
+                                                let directory = key.directory.clone();
+                                                let algorithm = key.algorithm.clone();
+                                                let remark = key.remark.clone();
+                                                view! {
+                                                    <button
+                                                        type="button"
+                                                        class=move || {
+                                                            if selected_key.get() == Some(key_id) {
+                                                                "w-full flex items-center gap-3 rounded-md px-3 py-2 text-left bg-primary-soft text-content"
+                                                            } else {
+                                                                "w-full flex items-center gap-3 rounded-md px-3 py-2 text-left text-content hover:bg-surface"
+                                                            }
+                                                        }
+                                                        prop:disabled=move || submitting.get()
+                                                        on:click=move |_| selected_key.set(Some(key_id))
+                                                    >
+                                                        <span class=move || {
+                                                            if selected_key.get() == Some(key_id) {
+                                                                "inline-flex size-4 shrink-0 items-center justify-center rounded-full border border-primary bg-primary text-on-primary"
+                                                            } else {
+                                                                "inline-flex size-4 shrink-0 items-center justify-center rounded-full border border-border"
+                                                            }
+                                                        }>
+                                                            <Show when=move || selected_key.get() == Some(key_id)>
+                                                                <Icon name=IconName::Check class="size-3" />
+                                                            </Show>
+                                                        </span>
+                                                        <span class="min-w-0 grow">
+                                                            <span class="block truncate text-sm font-medium font-mono">{directory.clone()}</span>
+                                                            <span class="block truncate text-xs text-muted">
+                                                                {if remark.is_empty() { algorithm.clone() } else { format!("{algorithm} · {remark}") }}
+                                                            </span>
+                                                        </span>
+                                                    </button>
+                                                }
+                                            }
+                                        />
+                                    </div>
+                                </Show>
+                            </Show>
+                        </div>
+
+                        <label class="flex items-center justify-between gap-4 rounded-lg border border-border bg-bg px-3 py-3">
+                            <span class="min-w-0">
+                                <span class="block text-sm font-medium text-content">{move || t("repos.bind_dialog_writable")}</span>
+                                <span class="block text-xs text-muted">{move || t("repos.bind_dialog_writable_help")}</span>
+                            </span>
+                            <input
+                                type="checkbox"
+                                class="size-4 accent-primary"
+                                prop:checked=move || writable.get()
+                                prop:disabled=move || submitting.get()
+                                on:change=move |ev| {
+                                    let checked = ev
+                                        .target()
+                                        .and_then(|target| target.dyn_into::<web_sys::HtmlInputElement>().ok())
+                                        .map(|input| input.checked())
+                                        .unwrap_or(false);
+                                    writable.set(checked);
+                                }
+                            />
+                        </label>
+                    </div>
+
+                    <div class="flex justify-end gap-2 px-6 py-4 border-t border-border">
+                        <button
+                            type="button"
+                            class="px-4 py-2 text-sm font-medium rounded-lg bg-bg text-content hover:text-primary focus:outline-none disabled:opacity-50"
+                            prop:disabled=move || submitting.get()
+                            on:click=move |_| close()
+                        >
+                            {move || t("common.cancel")}
+                        </button>
+                        <button
+                            type="button"
+                            class="px-4 py-2 text-sm font-medium rounded-lg bg-primary text-on-primary hover:bg-primary-hover focus:outline-none disabled:opacity-50"
+                            prop:disabled=move || loading.get() || submitting.get() || selected_key.get().is_none()
+                            on:click=move |_| on_submit.call(())
+                        >
+                            {move || if submitting.get() { t("repos.bind_dialog_submitting") } else { t("repos.bind_dialog_submit") }}
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </Show>
     }
 }
 

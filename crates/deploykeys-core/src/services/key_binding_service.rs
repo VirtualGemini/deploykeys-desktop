@@ -146,6 +146,149 @@ impl KeyBindingService {
         }
     }
 
+    /// Upload an existing local SSH public key as a GitHub deploy key, then
+    /// persist the binding between the repository and the key's target.
+    pub async fn upload_existing_key(
+        &self,
+        repo_id: i64,
+        ssh_key_id: i64,
+        token: &str,
+        permission: DeployKeyPermission,
+    ) -> Result<KeyBinding> {
+        let repo = self
+            .db
+            .repositories()
+            .find_by_id(repo_id)
+            .await?
+            .ok_or_else(|| Error::NotFound("Repository not found".into()))?;
+
+        let ssh_key = self
+            .db
+            .ssh_keys()
+            .find_by_id(ssh_key_id)
+            .await?
+            .ok_or_else(|| Error::NotFound("SSH key not found".into()))?;
+
+        if self
+            .db
+            .key_bindings()
+            .find_by_repo_and_target(repo.id, ssh_key.target_id)
+            .await?
+            .is_some()
+        {
+            return Err(Error::AlreadyExists(
+                "Key binding already exists for this repository and target".into(),
+            ));
+        }
+
+        if !tokio::fs::try_exists(&ssh_key.private_key_path)
+            .await
+            .unwrap_or(false)
+            || !tokio::fs::try_exists(&ssh_key.public_key_path)
+                .await
+                .unwrap_or(false)
+        {
+            return Err(Error::NotFound(
+                "SSH key directory or key files are missing".into(),
+            ));
+        }
+
+        let public_key = tokio::fs::read_to_string(&ssh_key.public_key_path)
+            .await?
+            .trim()
+            .to_string();
+        if public_key.is_empty() {
+            return Err(Error::Validation("SSH public key is empty".into()));
+        }
+
+        let title = format!("DeployKeys - {}", ssh_key.directory);
+        let request = CreateDeployKeyRequest {
+            title: title.clone(),
+            key: public_key.clone(),
+            read_only: matches!(permission, DeployKeyPermission::ReadOnly),
+        };
+
+        let deploy_key = self
+            .github
+            .create_deploy_key(token, &repo.owner, &repo.name, &request)
+            .await?;
+
+        let binding = KeyBinding {
+            id: 0,
+            repo_id: repo.id,
+            target_id: ssh_key.target_id,
+            github_deploy_key_id: Some(deploy_key.id),
+            deploy_key_title: title,
+            algorithm: ssh_key.algorithm,
+            permission,
+            public_key,
+            public_key_fingerprint: ssh_key.public_key_fingerprint,
+            private_key_path: ssh_key.private_key_path,
+            private_key_residency: KeyResidency::Local,
+            status: KeyBindingStatus::Active,
+            created_at: Utc::now(),
+            last_verified_at: Some(Utc::now()),
+        };
+
+        match self.db.key_bindings().create(&binding).await {
+            Ok(id) => {
+                let binding = KeyBinding { id, ..binding };
+                if let Err(e) = ensure_repo_ssh_config(&repo, &binding).await {
+                    tracing::warn!(
+                        "SSH config update failed; rolling back deploy key {} on {}/{}",
+                        deploy_key.id,
+                        repo.owner,
+                        repo.name
+                    );
+                    if let Err(db_rollback) = self.db.key_bindings().delete(binding.id).await {
+                        tracing::error!(
+                            "Rollback failed; binding {} could not be deleted: {}",
+                            binding.id,
+                            db_rollback
+                        );
+                    }
+                    if let Err(remote_rollback) = self
+                        .github
+                        .delete_deploy_key(token, &repo.owner, &repo.name, deploy_key.id)
+                        .await
+                    {
+                        tracing::error!(
+                            "Rollback failed; deploy key {} on {}/{} is orphaned: {}",
+                            deploy_key.id,
+                            repo.owner,
+                            repo.name,
+                            remote_rollback
+                        );
+                    }
+                    return Err(e);
+                }
+                Ok(binding)
+            }
+            Err(e) => {
+                tracing::warn!(
+                    "Binding insert failed; rolling back deploy key {} on {}/{}",
+                    deploy_key.id,
+                    repo.owner,
+                    repo.name
+                );
+                if let Err(rollback) = self
+                    .github
+                    .delete_deploy_key(token, &repo.owner, &repo.name, deploy_key.id)
+                    .await
+                {
+                    tracing::error!(
+                        "Rollback failed; deploy key {} on {}/{} is orphaned: {}",
+                        deploy_key.id,
+                        repo.owner,
+                        repo.name,
+                        rollback
+                    );
+                }
+                Err(e)
+            }
+        }
+    }
+
     /// Re-check a binding against GitHub and the local filesystem.
     ///
     /// Status transitions follow the drift model from PLAN.md:
@@ -230,6 +373,123 @@ async fn ensure_private_dir(parent: &Path) -> Result<()> {
 async fn remove_local_key_files(private_path: &Path) {
     let _ = tokio::fs::remove_file(private_path).await;
     let _ = tokio::fs::remove_file(private_path.with_extension("pub")).await;
+}
+
+async fn ensure_repo_ssh_config(
+    repo: &crate::models::Repository,
+    binding: &KeyBinding,
+) -> Result<()> {
+    let home =
+        dirs::home_dir().ok_or_else(|| Error::Other("Could not find home directory".into()))?;
+    let ssh_dir = home.join(".ssh");
+    tokio::fs::create_dir_all(&ssh_dir).await?;
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        tokio::fs::set_permissions(&ssh_dir, std::fs::Permissions::from_mode(0o700)).await?;
+    }
+
+    let config_path = ssh_dir.join("config");
+    let current = match tokio::fs::read_to_string(&config_path).await {
+        Ok(content) => content,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => String::new(),
+        Err(e) => return Err(e.into()),
+    };
+    let marker_id = format!("repo:{}", repo.id);
+    let begin = format!("# >>> deploykeys-desktop {marker_id}");
+    let end = format!("# <<< deploykeys-desktop {marker_id}");
+    let host_alias = repo_ssh_host_alias(repo);
+    let block = format!(
+        "{begin}\n\
+         # Repository: {full_name}\n\
+         Host {host_alias}\n\
+             HostName github.com\n\
+             User git\n\
+            IdentityFile {identity_file}\n\
+             IdentitiesOnly yes\n\
+         {end}\n",
+        full_name = repo.full_name,
+        identity_file = quote_ssh_config_value(&binding.private_key_path),
+    );
+
+    let next = replace_managed_block(&current, &begin, &end, &block);
+    tokio::fs::write(&config_path, next).await?;
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        tokio::fs::set_permissions(&config_path, std::fs::Permissions::from_mode(0o600)).await?;
+    }
+
+    Ok(())
+}
+
+fn repo_ssh_host_alias(repo: &crate::models::Repository) -> String {
+    let readable = sanitize_host_part(&repo.full_name.replace('/', "-"));
+    format!("deploykeys-{}-{}", repo.id, readable)
+}
+
+fn sanitize_host_part(value: &str) -> String {
+    let mut out = String::new();
+    let mut last_dash = false;
+    for c in value.chars() {
+        let next = if c.is_ascii_alphanumeric() {
+            Some(c.to_ascii_lowercase())
+        } else if matches!(c, '-' | '_' | '.') {
+            Some('-')
+        } else {
+            None
+        };
+
+        if let Some(c) = next {
+            if c == '-' {
+                if !last_dash && !out.is_empty() {
+                    out.push(c);
+                }
+                last_dash = true;
+            } else {
+                out.push(c);
+                last_dash = false;
+            }
+        }
+    }
+    out.trim_matches('-').to_string()
+}
+
+fn quote_ssh_config_value(value: &str) -> String {
+    format!("\"{}\"", value.replace('\\', "\\\\").replace('"', "\\\""))
+}
+
+fn replace_managed_block(current: &str, begin: &str, end: &str, block: &str) -> String {
+    if let Some(start) = current.find(begin) {
+        if let Some(relative_end) = current[start..].find(end) {
+            let end_index = start + relative_end + end.len();
+            let after_end = current[end_index..]
+                .strip_prefix('\n')
+                .unwrap_or(&current[end_index..]);
+            let mut next = String::new();
+            next.push_str(current[..start].trim_end_matches('\n'));
+            if !next.is_empty() {
+                next.push_str("\n\n");
+            }
+            next.push_str(block.trim_end_matches('\n'));
+            if !after_end.trim().is_empty() {
+                next.push_str("\n\n");
+                next.push_str(after_end.trim_start_matches('\n'));
+            } else {
+                next.push('\n');
+            }
+            return next;
+        }
+    }
+
+    let mut next = current.trim_end_matches('\n').to_string();
+    if !next.is_empty() {
+        next.push_str("\n\n");
+    }
+    next.push_str(block);
+    next
 }
 
 #[cfg(test)]
@@ -502,5 +762,47 @@ mod tests {
             .unwrap()
             .unwrap();
         assert_eq!(updated.status, KeyBindingStatus::OrphanedRemote);
+    }
+
+    #[test]
+    fn replace_managed_block_appends_when_missing() {
+        let current = "Host github.com\n    User git\n";
+        let block = "# >>> deploykeys-desktop repo:1\nHost deploykeys-1-owner-repo\n# <<< deploykeys-desktop repo:1\n";
+
+        let next = replace_managed_block(
+            current,
+            "# >>> deploykeys-desktop repo:1",
+            "# <<< deploykeys-desktop repo:1",
+            block,
+        );
+
+        assert!(next.starts_with(current.trim_end()));
+        assert!(next.contains("Host deploykeys-1-owner-repo"));
+    }
+
+    #[test]
+    fn replace_managed_block_replaces_existing_block() {
+        let current = "before\n\n# >>> deploykeys-desktop repo:1\nold\n# <<< deploykeys-desktop repo:1\n\nafter\n";
+        let block = "# >>> deploykeys-desktop repo:1\nnew\n# <<< deploykeys-desktop repo:1\n";
+
+        let next = replace_managed_block(
+            current,
+            "# >>> deploykeys-desktop repo:1",
+            "# <<< deploykeys-desktop repo:1",
+            block,
+        );
+
+        assert!(next.contains("before"));
+        assert!(next.contains("new"));
+        assert!(next.contains("after"));
+        assert!(!next.contains("old"));
+    }
+
+    #[test]
+    fn ssh_config_value_is_quoted_and_escaped() {
+        assert_eq!(
+            quote_ssh_config_value(r#"/Users/me/SSH Keys/"prod"/id_ed25519"#),
+            r#""/Users/me/SSH Keys/\"prod\"/id_ed25519""#
+        );
     }
 }
