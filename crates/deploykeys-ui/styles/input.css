@@ -67,9 +67,6 @@
 }
 
 @layer utilities {
-}
-
-@layer utilities {
   /* The single header progress line. Width is driven inline by the component
      (aggregate percent while running, 100 % while completing); opacity is
      toggled via the `opacity-0` utility so the bar fades only after it has

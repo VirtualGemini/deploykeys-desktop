@@ -10,7 +10,23 @@ use crate::icons::{Icon, IconName};
 use crate::page_size::page_size;
 use crate::progress::ProgressHandle;
 use leptos::*;
+use wasm_bindgen::JsCast;
 use wasm_bindgen_futures::spawn_local;
+
+#[derive(Clone, Copy)]
+struct TableDragState {
+    pointer_id: i32,
+    start_x: i32,
+    start_y: i32,
+    scroll_left: i32,
+    scroll_top: i32,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum CreatedAtSort {
+    Desc,
+    Asc,
+}
 
 #[component]
 pub fn Keys(#[allow(unused_variables)] pending_count: RwSignal<usize>) -> impl IntoView {
@@ -24,6 +40,9 @@ pub fn Keys(#[allow(unused_variables)] pending_count: RwSignal<usize>) -> impl I
     let created_to = RwSignal::new(String::new());
     let page = RwSignal::new(1_usize);
     let missing_key_confirm = RwSignal::new(None::<i64>);
+    let table_scroll_ref = NodeRef::<html::Div>::new();
+    let table_drag = RwSignal::new(None::<TableDragState>);
+    let created_at_sort = RwSignal::new(CreatedAtSort::Desc);
 
     // SSH keys are purely local — load them unconditionally on mount, with no
     // sign-in dependency.
@@ -57,13 +76,14 @@ pub fn Keys(#[allow(unused_variables)] pending_count: RwSignal<usize>) -> impl I
         });
     };
 
-    // Filtered keys by search query
+    // Filtered keys by search query, then sorted by created time before paging.
     let filtered = Signal::derive(move || {
         let q = query.get().to_lowercase();
         let algorithm = algorithm_filter.get();
         let from = created_from.get();
         let to = created_to.get();
-        keys.get()
+        let mut items = keys
+            .get()
             .into_iter()
             .filter(|k| {
                 let matches_query = q.is_empty()
@@ -77,7 +97,14 @@ pub fn Keys(#[allow(unused_variables)] pending_count: RwSignal<usize>) -> impl I
 
                 matches_query && matches_algorithm && matches_from && matches_to
             })
-            .collect::<Vec<_>>()
+            .collect::<Vec<_>>();
+
+        items.sort_by(|a, b| a.created_at.cmp(&b.created_at));
+        if created_at_sort.get() == CreatedAtSort::Desc {
+            items.reverse();
+        }
+
+        items
     });
 
     let filtered_count = Signal::derive(move || filtered.get().len());
@@ -134,7 +161,27 @@ pub fn Keys(#[allow(unused_variables)] pending_count: RwSignal<usize>) -> impl I
         algorithm_filter.set(value);
         page.set(1);
     };
+    let set_created_at_sort = move |value: CreatedAtSort| {
+        if created_at_sort.get_untracked() != value {
+            created_at_sort.set(value);
+            page.set(1);
+        }
+    };
+    let toggle_created_at_sort = move |_| {
+        let next = match created_at_sort.get_untracked() {
+            CreatedAtSort::Desc => CreatedAtSort::Asc,
+            CreatedAtSort::Asc => CreatedAtSort::Desc,
+        };
+        set_created_at_sort(next);
+    };
     let reset_page = Callback::new(move |_| page.set(1));
+    let clear_table_drag = move |pointer_id: i32| {
+        if let Some(drag) = table_drag.get_untracked() {
+            if drag.pointer_id == pointer_id {
+                table_drag.set(None);
+            }
+        }
+    };
 
     let copy_public_key = move |id: i64| {
         let sim = progress.begin_simulated();
@@ -201,14 +248,16 @@ pub fn Keys(#[allow(unused_variables)] pending_count: RwSignal<usize>) -> impl I
                 </button>
             </div>
 
-            <div class="flex flex-wrap items-center gap-2">
-                <input
-                    type="text"
-                    class="flex-1 min-w-[12rem] py-2 px-3 text-sm rounded-lg border border-border bg-bg text-content placeholder:text-muted focus:outline-none"
-                    placeholder=move || t("keys.search_placeholder")
-                    prop:value=move || query.get()
-                    on:input=move |ev| set_query(event_target_value(&ev))
-                />
+            <div class="flex items-center gap-2 min-w-0">
+                <div class="flex-1 min-w-0">
+                    <input
+                        type="text"
+                        class="w-full min-w-0 py-2 px-3 text-sm rounded-lg border border-border bg-bg text-content placeholder:text-muted focus:outline-none"
+                        placeholder=move || t("keys.search_placeholder")
+                        prop:value=move || query.get()
+                        on:input=move |ev| set_query(event_target_value(&ev))
+                    />
+                </div>
                 <FilterDropdown
                     options=algorithm_options
                     selected=Signal::derive(move || algorithm_filter.get())
@@ -239,103 +288,204 @@ pub fn Keys(#[allow(unused_variables)] pending_count: RwSignal<usize>) -> impl I
                             when=move || !filtered.get().is_empty()
                         fallback=move || view! { <p class="text-sm text-muted">{move || t("keys.no_match")}</p> }
                     >
-                            <div class="flex flex-col gap-4 flex-1 min-h-0">
-                                <div class="flex-1 overflow-x-auto overflow-y-auto min-h-0 rounded-lg border border-border bg-surface">
-                                    <table class="min-w-[84rem] w-full border-collapse text-sm">
-                                        <thead class="sticky top-0 z-10 bg-surface">
-                                            <tr class="border-b border-border">
-                                                <th class="w-[16rem] min-w-[16rem] text-start font-medium text-muted px-4 py-2.5 whitespace-nowrap">
-                                                    {move || t("keys.directory")}
-                                                </th>
-                                                <th class="w-[9rem] min-w-[9rem] text-start font-medium text-muted px-4 py-2.5 whitespace-nowrap">
-                                                    {move || t("keys.algorithm")}
-                                                </th>
-                                                <th class="w-[20rem] min-w-[20rem] text-start font-medium text-muted px-4 py-2.5 whitespace-nowrap">
-                                                    {move || t("keys.comment")}
-                                                </th>
-                                                <th class="w-[18rem] min-w-[18rem] text-start font-medium text-muted px-4 py-2.5 whitespace-nowrap">
-                                                    {move || t("keys.remark")}
-                                                </th>
-                                                <th class="w-[12rem] min-w-[12rem] text-start font-medium text-muted px-4 py-2.5 whitespace-nowrap">
-                                                    {move || t("keys.created_at")}
-                                                </th>
-                                                <th class="sticky right-0 z-20 w-[8rem] min-w-[8rem] bg-surface text-start font-medium text-muted px-3 py-2.5 whitespace-nowrap relative">
-                                                    <span class="pointer-events-none absolute inset-y-0 left-0 w-px bg-border"></span>
-                                                    {move || t("keys.actions")}
-                                                </th>
-                                            </tr>
-                                        </thead>
-                                        <tbody>
-                                            <For
-                                                each=move || paged.get()
-                                                key=|k| k.id
-                                                children=move |key| {
-                                                let key_id = key.id;
-                                                let key_directory = key.directory.clone();
-                                                let directory = key.directory.clone();
-                                                let algorithm = key.algorithm.clone();
-                                                let comment = key.comment.clone();
-                                                let created_at = key.created_at.clone();
-                                                let remark = key.remark.clone();
-                                                let remark_for_dialog = remark.clone();
-                                                let delete_confirm_open = RwSignal::new(false);
-                                                let edit_open = RwSignal::new(false);
-                                                view! {
-                                                    <tr class="group border-b border-border last:border-b-0 hover:bg-bg align-top">
-                                                        <td class="min-w-[16rem] px-4 py-3">
-                                                            <span class="font-medium text-content font-mono break-all">{directory}</span>
-                                                        </td>
-                                                        <td class="min-w-[9rem] px-4 py-3 whitespace-nowrap">
-                                                            <span class="text-[11px] py-0.5 px-2 rounded-full border border-border text-muted">
-                                                                {algorithm}
-                                                            </span>
-                                                        </td>
-                                                        <td class="min-w-[20rem] px-4 py-3">
-                                                            <span class="text-content font-mono break-all">{comment}</span>
-                                                        </td>
-                                                        <td class="min-w-[18rem] px-4 py-3">
-                                                            <span class="text-muted break-words line-clamp-3">
-                                                                {if remark.is_empty() { "—".to_string() } else { remark }}
-                                                            </span>
-                                                        </td>
-                                                        <td class="min-w-[12rem] px-4 py-3 text-muted whitespace-nowrap">{created_at}</td>
-                                                        <td class="sticky right-0 z-[1] min-w-[8rem] bg-surface px-3 py-3 group-hover:bg-bg relative">
-                                                            <span class="pointer-events-none absolute inset-y-0 left-0 w-px bg-border"></span>
-                                                            <div class="inline-flex min-w-max items-center gap-1.5">
-                                                                <button
-                                                                    type="button"
-                                                                    title=move || t("keys.copy_public_key")
-                                                                    aria-label=move || t("keys.copy_public_key")
-                                                                    class="inline-flex items-center justify-center size-8 rounded-md text-primary hover:bg-primary-soft focus:outline-none"
-                                                                    on:click=move |_| copy_public_key(key_id)
-                                                                >
-                                                                    <Icon name=IconName::Copy class="size-4" />
-                                                                </button>
-                                                                <button
-                                                                    type="button"
-                                                                    title=move || t("keys.edit")
-                                                                    aria-label=move || t("keys.edit")
-                                                                    class="inline-flex items-center justify-center size-8 rounded-md text-content hover:bg-primary-soft dark:hover:bg-primary-soft/60 focus:outline-none"
-                                                                    on:click=move |_| edit_open.set(true)
-                                                                >
-                                                                    <Icon name=IconName::Edit class="size-4" />
-                                                                </button>
-                                                                <button
-                                                                    type="button"
-                                                                    title=move || t("keys.delete")
-                                                                    aria-label=move || t("keys.delete")
-                                                                    class="inline-flex items-center justify-center size-8 rounded-md text-red-600 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-950 focus:outline-none"
-                                                                    on:click=move |_| delete_confirm_open.set(true)
-                                                                >
-                                                                    <Icon name=IconName::Delete class="size-4" />
-                                                                </button>
-                                                            </div>
-                                                        </td>
-                                                    </tr>
+                            <div class="flex flex-col flex-1 min-h-0">
+                                <div class="relative flex-1 min-h-0 flex flex-col">
+                                    <div class="min-h-0 flex-1 rounded-lg border border-border bg-surface overflow-hidden">
+                                        <div
+                                            node_ref=table_scroll_ref
+                                            class="h-full overflow-x-auto overflow-y-auto min-h-0 cursor-grab"
+                                            class:cursor-grabbing=move || table_drag.get().is_some()
+                                            class:select-none=move || table_drag.get().is_some()
+                                            style="touch-action: none;"
+                                            on:pointerdown=move |ev| {
+                                                if ev.pointer_type() == "mouse" && ev.button() != 0 {
+                                                    return;
+                                                }
 
-                                                    <Show when=move || delete_confirm_open.get()>
-                                                        <div class="fixed inset-0 z-[100] bg-black/50 backdrop-blur-sm flex items-center justify-center px-4">
-                                                            <div class="w-full max-w-md bg-surface border border-border rounded-xl shadow-2xl overflow-hidden">
+                                                let started_on_interactive = ev
+                                                    .target()
+                                                    .and_then(|target| target.dyn_into::<web_sys::Element>().ok())
+                                                    .and_then(|element| {
+                                                        element
+                                                            .closest("button, input, select, textarea, a, [data-no-drag-scroll]")
+                                                            .ok()
+                                                            .flatten()
+                                                    })
+                                                    .is_some();
+                                                if started_on_interactive {
+                                                    return;
+                                                }
+
+                                                if let Some(scroller) = table_scroll_ref.get() {
+                                                    let _ = scroller.set_pointer_capture(ev.pointer_id());
+                                                    table_drag.set(Some(TableDragState {
+                                                        pointer_id: ev.pointer_id(),
+                                                        start_x: ev.client_x(),
+                                                        start_y: ev.client_y(),
+                                                        scroll_left: scroller.scroll_left(),
+                                                        scroll_top: scroller.scroll_top(),
+                                                    }));
+                                                    ev.prevent_default();
+                                                }
+                                            }
+                                            on:pointermove=move |ev| {
+                                                if let Some(drag) = table_drag.get_untracked() {
+                                                    if drag.pointer_id != ev.pointer_id() {
+                                                        return;
+                                                    }
+                                                    if let Some(scroller) = table_scroll_ref.get() {
+                                                        let delta_x = ev.client_x() - drag.start_x;
+                                                        let delta_y = ev.client_y() - drag.start_y;
+                                                        scroller.set_scroll_left(drag.scroll_left - delta_x);
+                                                        scroller.set_scroll_top(drag.scroll_top - delta_y);
+                                                        ev.prevent_default();
+                                                    }
+                                                }
+                                            }
+                                            on:pointerup=move |ev| clear_table_drag(ev.pointer_id())
+                                            on:pointercancel=move |ev| clear_table_drag(ev.pointer_id())
+                                        >
+                                            <table class="min-w-[50rem] w-full table-fixed border-collapse text-sm">
+                                            <thead class="sticky top-0 z-10 bg-surface">
+                                                <tr class="border-b border-border">
+                                                    <th class="w-[8rem] min-w-[8rem] text-start font-medium text-muted px-3 py-2 whitespace-nowrap align-middle">
+                                                        {move || t("keys.directory")}
+                                                    </th>
+                                                    <th class="w-[9rem] min-w-[9rem] text-start font-medium text-muted px-3 py-2 whitespace-nowrap align-middle">
+                                                        {move || t("keys.algorithm")}
+                                                    </th>
+                                                    <th class="w-[12rem] min-w-[12rem] text-start font-medium text-muted px-3 py-2 whitespace-nowrap align-middle">
+                                                        {move || t("keys.remark")}
+                                                    </th>
+                                                    <th class="w-[12rem] min-w-[12rem] text-start font-medium text-muted px-3 py-2 whitespace-nowrap align-middle">
+                                                        <div class="flex items-center gap-1.5">
+                                                            <span>{move || t("keys.created_at")}</span>
+                                                            <button
+                                                                type="button"
+                                                                title=move || {
+                                                                    if created_at_sort.get() == CreatedAtSort::Asc {
+                                                                        t("keys.sort_created_at_desc")
+                                                                    } else {
+                                                                        t("keys.sort_created_at_asc")
+                                                                    }
+                                                                }
+                                                                aria-label=move || {
+                                                                    if created_at_sort.get() == CreatedAtSort::Asc {
+                                                                        t("keys.sort_created_at_desc")
+                                                                    } else {
+                                                                        t("keys.sort_created_at_asc")
+                                                                    }
+                                                                }
+                                                                class="inline-flex size-5 items-center justify-center text-muted hover:text-content focus:outline-none"
+                                                                on:click=toggle_created_at_sort
+                                                            >
+                                                                <span class="text-[10px] leading-none text-content">
+                                                                    {move || if created_at_sort.get() == CreatedAtSort::Asc { "▲" } else { "▼" }}
+                                                                </span>
+                                                            </button>
+                                                        </div>
+                                                    </th>
+                                                    <th class="sticky right-0 z-20 w-[8rem] min-w-[8rem] bg-surface text-start font-medium text-muted px-3 py-2 whitespace-nowrap align-middle relative">
+                                                        <span class="pointer-events-none absolute inset-y-0 left-0 w-px bg-border"></span>
+                                                        {move || t("keys.actions")}
+                                                    </th>
+                                                </tr>
+                                            </thead>
+                                            <tbody>
+                                                <For
+                                                    each=move || paged.get()
+                                                    key=|k| k.id
+                                                    children=move |key| {
+                                                    let key_id = key.id;
+                                                    let key_directory = key.directory.clone();
+                                                    let directory = key.directory.clone();
+                                                    let algorithm = key.algorithm.clone();
+                                                    let created_at = key.created_at.clone();
+                                                    let remark = key.remark.clone();
+                                                    let remark_for_dialog = remark.clone();
+                                                    let delete_confirm_open = RwSignal::new(false);
+                                                    let edit_open = RwSignal::new(false);
+                                                    view! {
+                                                        <tr class="group border-b border-border last:border-b-0 hover:bg-bg align-middle">
+                                                            <td class="w-[8rem] min-w-[8rem] max-w-[8rem] px-3 py-2 align-middle">
+                                                                <TruncatedCellText
+                                                                    display=directory.clone()
+                                                                    tooltip=directory
+                                                                    class="font-medium text-content font-mono"
+                                                                />
+                                                            </td>
+                                                            <td class="w-[9rem] min-w-[9rem] px-3 py-2 whitespace-nowrap align-middle">
+                                                                <span class="inline-flex items-center text-[11px] py-0.5 px-2 rounded-full border border-border text-muted">
+                                                                    {algorithm}
+                                                                </span>
+                                                            </td>
+                                                            <td class="w-[12rem] min-w-[12rem] max-w-[12rem] px-3 py-2 align-middle">
+                                                                <TruncatedCellText
+                                                                    display=if remark.is_empty() { "—".to_string() } else { remark.clone() }
+                                                                    tooltip=remark
+                                                                    class="text-muted"
+                                                                />
+                                                            </td>
+                                                            <td class="w-[12rem] min-w-[12rem] px-3 py-2 text-muted whitespace-nowrap align-middle">
+                                                                <TruncatedCellText
+                                                                    display=created_at.clone()
+                                                                    tooltip=created_at
+                                                                    class="text-muted"
+                                                                />
+                                                            </td>
+                                                            <td class="sticky right-0 z-[1] min-w-[8rem] bg-surface px-3 py-2 group-hover:bg-bg relative align-middle">
+                                                                <span class="pointer-events-none absolute inset-y-0 left-0 w-px bg-border"></span>
+                                                                <div class="inline-flex min-w-max items-center gap-1.5">
+                                                                    <button
+                                                                        type="button"
+                                                                        title=move || t("keys.copy_public_key")
+                                                                        aria-label=move || t("keys.copy_public_key")
+                                                                        class="inline-flex items-center justify-center size-8 rounded-md text-primary hover:bg-primary-soft focus:outline-none"
+                                                                        on:click=move |_| copy_public_key(key_id)
+                                                                    >
+                                                                        <Icon name=IconName::Copy class="size-4" />
+                                                                    </button>
+                                                                    <button
+                                                                        type="button"
+                                                                        title=move || t("keys.edit")
+                                                                        aria-label=move || t("keys.edit")
+                                                                        class="inline-flex items-center justify-center size-8 rounded-md text-content hover:bg-primary-soft dark:hover:bg-primary-soft/60 focus:outline-none"
+                                                                        on:click=move |_| edit_open.set(true)
+                                                                    >
+                                                                        <Icon name=IconName::Edit class="size-4" />
+                                                                    </button>
+                                                                    <button
+                                                                        type="button"
+                                                                        title=move || t("keys.delete")
+                                                                        aria-label=move || t("keys.delete")
+                                                                        class="inline-flex items-center justify-center size-8 rounded-md text-red-600 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-950 focus:outline-none"
+                                                                        on:click=move |_| delete_confirm_open.set(true)
+                                                                    >
+                                                                        <Icon name=IconName::Delete class="size-4" />
+                                                                    </button>
+                                                                </div>
+                                                            </td>
+                                                        </tr>
+
+                                                        <div class=move || {
+                                                            if delete_confirm_open.get() {
+                                                                "fixed inset-0 z-[100] bg-black/50 backdrop-blur-sm flex items-center justify-center px-4 opacity-100 transition-opacity duration-300"
+                                                            } else {
+                                                                "fixed inset-0 z-[100] bg-black/50 backdrop-blur-sm flex items-center justify-center px-4 opacity-0 pointer-events-none transition-opacity duration-300"
+                                                            }
+                                                        }
+                                                            on:click=move |_| delete_confirm_open.set(false)
+                                                        >
+                                                            <div
+                                                                class=move || {
+                                                                    if delete_confirm_open.get() {
+                                                                        "w-full max-w-md bg-surface border border-border rounded-xl shadow-2xl overflow-hidden scale-100 transition-transform duration-300"
+                                                                    } else {
+                                                                        "w-full max-w-md bg-surface border border-border rounded-xl shadow-2xl overflow-hidden scale-95 transition-transform duration-300"
+                                                                    }
+                                                                }
+                                                                on:click=|ev| ev.stop_propagation()
+                                                            >
                                                                 <div class="px-6 py-5">
                                                                     <h2 class="text-base font-semibold text-content">{move || t("keys.delete_confirm_title")}</h2>
                                                                     <p class="mt-2 text-sm text-muted">{move || t("keys.delete_confirm_message")}</p>
@@ -361,22 +511,24 @@ pub fn Keys(#[allow(unused_variables)] pending_count: RwSignal<usize>) -> impl I
                                                                 </div>
                                                             </div>
                                                         </div>
-                                                    </Show>
 
-                                                    <EditKeyDialog
-                                                        open=edit_open
-                                                        key_id=key_id
-                                                        current_directory=key_directory
-                                                        current_remark=remark_for_dialog
-                                                        on_missing=Callback::new(move |_| missing_key_confirm.set(Some(key_id)))
-                                                        on_done=Callback::new(move |_| refresh())
-                                                    />
+                                                        <EditKeyDialog
+                                                            open=edit_open
+                                                            key_id=key_id
+                                                            current_directory=key_directory
+                                                            current_remark=remark_for_dialog
+                                                            on_missing=Callback::new(move |_| missing_key_confirm.set(Some(key_id)))
+                                                            on_done=Callback::new(move |_| refresh())
+                                                        />
+                                                    }
                                                 }
-                                            }
-                                            />
-                                        </tbody>
-                                    </table>
+                                                />
+                                            </tbody>
+                                            </table>
+                                        </div>
+                                    </div>
                                 </div>
+                                <div class="shrink-0 h-4" aria-hidden="true"></div>
                                 <PaginationBar
                                     page=page
                                     page_count=page_count
@@ -421,6 +573,54 @@ pub fn Keys(#[allow(unused_variables)] pending_count: RwSignal<usize>) -> impl I
                             </button>
                         </div>
                     </div>
+                </div>
+            </Show>
+        </div>
+    }
+}
+
+#[component]
+fn TruncatedCellText(
+    #[prop(into)] display: String,
+    #[prop(optional, into)] tooltip: String,
+    #[prop(optional, into)] class: String,
+) -> impl IntoView {
+    let text_ref = NodeRef::<html::Span>::new();
+    let bubble_open = RwSignal::new(false);
+    let bubble = if tooltip.is_empty() {
+        display.clone()
+    } else {
+        tooltip
+    };
+    let show_bubble = !bubble.trim().is_empty() && bubble != "—";
+    let title_text = if show_bubble {
+        bubble.clone()
+    } else {
+        String::new()
+    };
+    let bubble_text = bubble.clone();
+    let update_bubble = move || {
+        let truncated = text_ref
+            .get()
+            .map(|element| element.scroll_width() > element.client_width())
+            .unwrap_or(false);
+        bubble_open.set(show_bubble && truncated);
+    };
+
+    view! {
+        <div class="group/cell relative flex max-w-full">
+            <span
+                node_ref=text_ref
+                class=format!("block max-w-full truncate whitespace-nowrap {class}")
+                title=title_text
+                on:mouseenter=move |_| update_bubble()
+                on:mouseleave=move |_| bubble_open.set(false)
+            >
+                {display}
+            </span>
+            <Show when=move || bubble_open.get()>
+                <div class="pointer-events-none absolute left-1/2 top-0 z-30 hidden w-max max-w-[min(28rem,calc(100vw-4rem))] -translate-x-1/2 -translate-y-[calc(100%+0.5rem)] whitespace-normal break-words rounded-lg border border-border bg-surface px-3 py-2 text-left text-xs leading-5 text-content shadow-xl group-hover/cell:block">
+                    {bubble_text.clone()}
                 </div>
             </Show>
         </div>
@@ -477,6 +677,88 @@ fn FilterDropdown(
                                 <button
                                     type="button"
                                     class="w-full flex items-center gap-x-2 py-1 px-2.5 rounded-lg text-sm text-content hover:bg-bg focus:outline-none focus:bg-bg whitespace-nowrap"
+                                    on:click=choose
+                                >
+                                    {move || {
+                                        let class = if is_selected() {
+                                            "size-3.5 text-primary"
+                                        } else {
+                                            "size-3.5 text-primary opacity-0"
+                                        };
+                                        view! { <Icon name=IconName::Check class=class /> }
+                                    }}
+                                    <span class="grow text-left">{display}</span>
+                                </button>
+                            }
+                        }
+                    />
+                </div>
+            </Show>
+        </div>
+    }
+}
+
+#[component]
+fn FormSelectDropdown(
+    #[prop(into)] options: Signal<Vec<(String, String)>>,
+    #[prop(into)] selected: Signal<String>,
+    on_select: Callback<String>,
+    #[prop(optional, into)] disabled: Signal<bool>,
+) -> impl IntoView {
+    let open = RwSignal::new(false);
+
+    let label = Signal::derive(move || {
+        let selected_value = selected.get();
+        options
+            .get()
+            .into_iter()
+            .find(|(value, _)| *value == selected_value)
+            .map(|(_, display)| display)
+            .unwrap_or_default()
+    });
+
+    view! {
+        <div class="relative">
+            <button
+                type="button"
+                class="w-full inline-flex items-center justify-between gap-2 py-2 px-3 text-sm rounded-lg border border-border bg-bg text-content hover:bg-surface focus:outline-none focus:ring-1 focus:ring-primary disabled:opacity-50 disabled:pointer-events-none"
+                prop:disabled=move || disabled.get()
+                on:click=move |_| open.update(|o| *o = !*o)
+            >
+                <span class="min-w-0 truncate text-left">{move || label.get()}</span>
+                <span class=move || {
+                    if open.get() {
+                        "inline-flex text-muted rotate-90 transition-transform duration-200"
+                    } else {
+                        "inline-flex text-muted transition-transform duration-200"
+                    }
+                }>
+                    <Icon name=IconName::ChevronRight class="size-4" />
+                </span>
+            </button>
+
+            <Show when=move || open.get()>
+                <div class="fixed inset-0 z-40" on:click=move |_| open.set(false)></div>
+                <div class="absolute start-0 mt-1 z-50 w-full p-1 bg-surface border border-border rounded-xl shadow-xl">
+                    <For
+                        each=move || options.get()
+                        key=|(value, _)| value.clone()
+                        children=move |(value, display)| {
+                            let is_selected = {
+                                let value = value.clone();
+                                move || selected.get() == value
+                            };
+                            let choose = {
+                                let value = value.clone();
+                                move |_| {
+                                    on_select.call(value.clone());
+                                    open.set(false);
+                                }
+                            };
+                            view! {
+                                <button
+                                    type="button"
+                                    class="w-full flex items-center gap-x-2 py-2 px-2.5 rounded-lg text-sm text-content hover:bg-bg focus:outline-none focus:bg-bg"
                                     on:click=choose
                                 >
                                     {move || {
@@ -559,10 +841,10 @@ fn DateRangeDropdown(
     };
 
     view! {
-        <div class="relative min-w-0">
+        <div class="relative shrink-0">
             <button
                 type="button"
-                class="inline-flex items-center justify-center w-44 max-w-full h-10 px-3 text-sm rounded-lg border border-border bg-bg text-content hover:bg-surface focus:outline-none whitespace-nowrap"
+                class="inline-flex items-center justify-center w-36 max-w-full h-10 px-3 text-sm rounded-lg border border-border bg-bg text-content hover:bg-surface focus:outline-none whitespace-nowrap"
                 on:click=open_picker
             >
                 <span class="min-w-0 truncate">{move || label.get()}</span>
@@ -1068,6 +1350,32 @@ fn PageSizeSelector() -> impl IntoView {
 }
 
 #[component]
+fn FieldLabelWithHelp(
+    #[prop(into)] label: Signal<&'static str>,
+    #[prop(into)] help: Signal<&'static str>,
+) -> impl IntoView {
+    view! {
+        <div class="mb-1.5 flex items-center gap-1.5">
+            <label class="text-sm font-medium text-content">
+                {move || label.get()}
+            </label>
+            <span class="group/help relative inline-flex">
+                <button
+                    type="button"
+                    class="inline-flex size-4 items-center justify-center rounded-full border border-border text-[10px] font-semibold leading-none text-muted hover:border-primary hover:text-primary focus:outline-none focus:ring-1 focus:ring-primary"
+                    aria-label=move || help.get()
+                >
+                    "?"
+                </button>
+                <span class="pointer-events-none absolute bottom-full left-1/2 z-[80] mb-2 hidden w-max -translate-x-1/2 whitespace-nowrap rounded-lg border border-border bg-surface px-3 py-2 text-left text-xs leading-5 text-content shadow-xl group-hover/help:block group-focus-within/help:block">
+                    {move || help.get()}
+                </span>
+            </span>
+        </div>
+    }
+}
+
+#[component]
 fn CreateKeyDialog(open: RwSignal<bool>, on_created: Callback<()>) -> impl IntoView {
     let progress = ProgressHandle::expect();
     let directory = RwSignal::new(String::new());
@@ -1076,6 +1384,13 @@ fn CreateKeyDialog(open: RwSignal<bool>, on_created: Callback<()>) -> impl IntoV
     let algorithm = RwSignal::new("ed25519".to_string());
     let creating = RwSignal::new(false);
     let error = RwSignal::new(None::<String>);
+    let algorithm_options = Signal::derive(move || {
+        vec![
+            ("ed25519".to_string(), t("keys.algorithm_ed25519").to_string()),
+            ("rsa2048".to_string(), t("keys.algorithm_rsa2048").to_string()),
+            ("rsa4096".to_string(), t("keys.algorithm_rsa4096").to_string()),
+        ]
+    });
 
     // Reset form when dialog opens
     create_effect(move |_| {
@@ -1129,9 +1444,9 @@ fn CreateKeyDialog(open: RwSignal<bool>, on_created: Callback<()>) -> impl IntoV
             <div
                 class=move || {
                     if open.get() {
-                        "w-full max-w-lg bg-surface border border-border rounded-xl shadow-2xl overflow-hidden scale-100 transition-transform duration-300"
+                        "w-full max-w-lg bg-surface border border-border rounded-xl shadow-2xl overflow-visible scale-100 transition-transform duration-300"
                     } else {
-                        "w-full max-w-lg bg-surface border border-border rounded-xl shadow-2xl overflow-hidden scale-95 transition-transform duration-300"
+                        "w-full max-w-lg bg-surface border border-border rounded-xl shadow-2xl overflow-visible scale-95 transition-transform duration-300"
                     }
                 }
                 on:click=|ev| ev.stop_propagation()
@@ -1147,27 +1462,44 @@ fn CreateKeyDialog(open: RwSignal<bool>, on_created: Callback<()>) -> impl IntoV
                             </div>
                         </Show>
 
-                        // Directory
-                        <div>
-                            <label class="block text-sm font-medium text-content mb-1.5">
-                                {move || t("keys.dialog_directory_label")}
-                            </label>
-                            <input
-                                type="text"
-                                class="w-full py-2 px-3 text-sm rounded-lg border border-border bg-bg text-content placeholder:text-muted focus:outline-none focus:ring-1 focus:ring-primary font-mono"
-                                placeholder=move || t("keys.dialog_directory_placeholder")
-                                prop:value=move || directory.get()
-                                on:input=move |ev| directory.set(event_target_value(&ev))
-                                prop:disabled=move || creating.get()
-                            />
-                            <p class="mt-1.5 text-xs text-muted">{move || t("keys.dialog_directory_help")}</p>
+                        <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                            // Directory
+                            <div class="min-w-0">
+                                <FieldLabelWithHelp
+                                    label=Signal::derive(move || t("keys.dialog_directory_label"))
+                                    help=Signal::derive(move || t("keys.dialog_directory_help"))
+                                />
+                                <input
+                                    type="text"
+                                    class="w-full py-2 px-3 text-sm rounded-lg border border-border bg-bg text-content placeholder:text-muted focus:outline-none focus:ring-1 focus:ring-primary font-mono"
+                                    placeholder=move || t("keys.dialog_directory_placeholder")
+                                    prop:value=move || directory.get()
+                                    on:input=move |ev| directory.set(event_target_value(&ev))
+                                    prop:disabled=move || creating.get()
+                                />
+                            </div>
+
+                            // Algorithm
+                            <div class="min-w-0">
+                                <FieldLabelWithHelp
+                                    label=Signal::derive(move || t("keys.dialog_algorithm_label"))
+                                    help=Signal::derive(move || t("keys.dialog_algorithm_help"))
+                                />
+                                <FormSelectDropdown
+                                    options=algorithm_options
+                                    selected=Signal::derive(move || algorithm.get())
+                                    on_select=Callback::new(move |value| algorithm.set(value))
+                                    disabled=Signal::derive(move || creating.get())
+                                />
+                            </div>
                         </div>
 
                         // Key Comment
                         <div>
-                            <label class="block text-sm font-medium text-content mb-1.5">
-                                {move || t("keys.dialog_comment_label")}
-                            </label>
+                            <FieldLabelWithHelp
+                                label=Signal::derive(move || t("keys.dialog_comment_label"))
+                                help=Signal::derive(move || t("keys.dialog_comment_help"))
+                            />
                             <input
                                 type="email"
                                 class="w-full py-2 px-3 text-sm rounded-lg border border-border bg-bg text-content placeholder:text-muted focus:outline-none focus:ring-1 focus:ring-primary font-mono"
@@ -1176,7 +1508,6 @@ fn CreateKeyDialog(open: RwSignal<bool>, on_created: Callback<()>) -> impl IntoV
                                 on:input=move |ev| comment.set(event_target_value(&ev))
                                 prop:disabled=move || creating.get()
                             />
-                            <p class="mt-1.5 text-xs text-muted">{move || t("keys.dialog_comment_help")}</p>
                         </div>
 
                         // Remark
@@ -1184,8 +1515,9 @@ fn CreateKeyDialog(open: RwSignal<bool>, on_created: Callback<()>) -> impl IntoV
                             <label class="block text-sm font-medium text-content mb-1.5">
                                 {move || t("keys.dialog_remark_label")}
                             </label>
-                            <textarea
-                                class="w-full min-h-20 py-2 px-3 text-sm rounded-lg border border-border bg-bg text-content placeholder:text-muted focus:outline-none focus:ring-1 focus:ring-primary resize-y"
+                            <input
+                                type="text"
+                                class="w-full py-2 px-3 text-sm rounded-lg border border-border bg-bg text-content placeholder:text-muted focus:outline-none focus:ring-1 focus:ring-primary"
                                 placeholder=move || t("keys.dialog_remark_placeholder")
                                 prop:value=move || remark.get()
                                 on:input=move |ev| remark.set(event_target_value(&ev))
@@ -1193,23 +1525,6 @@ fn CreateKeyDialog(open: RwSignal<bool>, on_created: Callback<()>) -> impl IntoV
                             />
                         </div>
 
-                        // Algorithm
-                        <div>
-                            <label class="block text-sm font-medium text-content mb-1.5">
-                                {move || t("keys.dialog_algorithm_label")}
-                            </label>
-                            <select
-                                class="w-full py-2 px-3 text-sm rounded-lg border border-border bg-bg text-content focus:outline-none focus:ring-1 focus:ring-primary"
-                                prop:value=move || algorithm.get()
-                                on:change=move |ev| algorithm.set(event_target_value(&ev))
-                                prop:disabled=move || creating.get()
-                            >
-                                <option value="ed25519">{move || t("keys.algorithm_ed25519")}</option>
-                                <option value="rsa2048">{move || t("keys.algorithm_rsa2048")}</option>
-                                <option value="rsa4096">{move || t("keys.algorithm_rsa4096")}</option>
-                            </select>
-                            <p class="mt-1.5 text-xs text-muted">{move || t("keys.dialog_algorithm_help")}</p>
-                        </div>
                     </div>
 
                     <div class="flex justify-end gap-2 px-6 py-4 border-t border-border">
@@ -1319,9 +1634,9 @@ fn EditKeyDialog(
             <div
                 class=move || {
                     if open.get() {
-                        "w-full max-w-lg bg-surface border border-border rounded-xl shadow-2xl overflow-hidden scale-100 transition-transform duration-300"
+                        "w-full max-w-lg bg-surface border border-border rounded-xl shadow-2xl overflow-visible scale-100 transition-transform duration-300"
                     } else {
-                        "w-full max-w-lg bg-surface border border-border rounded-xl shadow-2xl overflow-hidden scale-95 transition-transform duration-300"
+                        "w-full max-w-lg bg-surface border border-border rounded-xl shadow-2xl overflow-visible scale-95 transition-transform duration-300"
                     }
                 }
                 on:click=|ev| ev.stop_propagation()
@@ -1339,9 +1654,10 @@ fn EditKeyDialog(
 
                         // Directory
                         <div>
-                            <label class="block text-sm font-medium text-content mb-1.5">
-                                {move || t("keys.dialog_directory_label")}
-                            </label>
+                            <FieldLabelWithHelp
+                                label=Signal::derive(move || t("keys.dialog_directory_label"))
+                                help=Signal::derive(move || t("keys.dialog_directory_help"))
+                            />
                             <input
                                 type="text"
                                 class="w-full py-2 px-3 text-sm rounded-lg border border-border bg-bg text-content placeholder:text-muted focus:outline-none focus:ring-1 focus:ring-primary font-mono"
@@ -1350,7 +1666,6 @@ fn EditKeyDialog(
                                 on:input=move |ev| directory.set(event_target_value(&ev))
                                 prop:disabled=move || saving.get()
                             />
-                            <p class="mt-1.5 text-xs text-muted">{move || t("keys.dialog_directory_help")}</p>
                         </div>
 
                         // Remark
@@ -1358,8 +1673,9 @@ fn EditKeyDialog(
                             <label class="block text-sm font-medium text-content mb-1.5">
                                 {move || t("keys.dialog_remark_label")}
                             </label>
-                            <textarea
-                                class="w-full min-h-20 py-2 px-3 text-sm rounded-lg border border-border bg-bg text-content placeholder:text-muted focus:outline-none focus:ring-1 focus:ring-primary resize-y"
+                            <input
+                                type="text"
+                                class="w-full py-2 px-3 text-sm rounded-lg border border-border bg-bg text-content placeholder:text-muted focus:outline-none focus:ring-1 focus:ring-primary"
                                 placeholder=move || t("keys.dialog_remark_placeholder")
                                 prop:value=move || remark.get()
                                 on:input=move |ev| remark.set(event_target_value(&ev))
