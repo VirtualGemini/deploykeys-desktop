@@ -16,6 +16,7 @@ reqwest.workspace = true
 ssh-key.workspace = true
 keyring.workspace = true
 tracing.workspace = true
+dirs.workspace = true
 
 # Additional dependencies
 async-trait = "0.1"

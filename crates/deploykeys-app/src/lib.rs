@@ -7,9 +7,9 @@
 
 use deploykeys_core::credentials::CredentialStore;
 use deploykeys_core::db::Database;
-use deploykeys_core::models::Account;
+use deploykeys_core::models::{Account, KeyAlgorithm};
 use deploykeys_core::progress::{OperationId, ProgressReporter};
-use deploykeys_core::services::{AuthService, RepoSyncService};
+use deploykeys_core::services::{AuthService, RepoSyncService, SshKeyService};
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager, State};
 
@@ -82,6 +82,17 @@ struct RepoDto {
 #[derive(Serialize)]
 struct SyncSummaryDto {
     repositories: usize,
+}
+
+/// An SSH key sent to the webview for the Keys list.
+#[derive(Serialize)]
+struct SshKeyDto {
+    id: i64,
+    directory: String,
+    algorithm: String,
+    comment: String,
+    remark: String,
+    created_at: String,
 }
 
 /// Payload sent to the webview for each progress checkpoint.
@@ -271,6 +282,87 @@ async fn sync_repositories(
     Ok(SyncSummaryDto { repositories })
 }
 
+/// List all SSH keys for the local target.
+#[tauri::command]
+async fn list_ssh_keys(state: State<'_, AppState>) -> Result<Vec<SshKeyDto>, String> {
+    let service = SshKeyService::new(state.db.clone());
+    let keys = service.list_all_keys().await.map_err(|e| e.to_string())?;
+
+    Ok(keys.into_iter().map(ssh_key_dto).collect())
+}
+
+/// Create a new SSH key pair.
+#[tauri::command]
+async fn create_ssh_key(
+    state: State<'_, AppState>,
+    directory: String,
+    algorithm: String,
+    comment: String,
+    remark: String,
+) -> Result<SshKeyDto, String> {
+    let algo: KeyAlgorithm = algorithm
+        .parse()
+        .map_err(|e| format!("Invalid algorithm: {}", e))?;
+
+    let service = SshKeyService::new(state.db.clone());
+    let key = service
+        .create_key(directory, algo, comment, remark)
+        .await
+        .map_err(|e| e.to_string())?;
+
+    Ok(ssh_key_dto(key))
+}
+
+/// Delete an SSH key and its files.
+#[tauri::command]
+async fn delete_ssh_key(state: State<'_, AppState>, id: i64) -> Result<(), String> {
+    let service = SshKeyService::new(state.db.clone());
+    service.delete_key(id).await.map_err(|e| e.to_string())
+}
+
+/// Edit an SSH key's directory and remark. The directory rename moves the
+/// key's folder on disk and rewrites the stored file paths.
+#[tauri::command]
+async fn update_ssh_key(
+    state: State<'_, AppState>,
+    id: i64,
+    directory: String,
+    remark: String,
+) -> Result<SshKeyDto, String> {
+    let service = SshKeyService::new(state.db.clone());
+    let key = service
+        .update_key(id, &directory, &remark)
+        .await
+        .map_err(|e| e.to_string())?;
+
+    Ok(ssh_key_dto(key))
+}
+
+/// Get the public key file content for copying to clipboard.
+#[tauri::command]
+async fn get_public_key_content(state: State<'_, AppState>, id: i64) -> Result<String, String> {
+    let service = SshKeyService::new(state.db.clone());
+    service.read_public_key(id).await.map_err(|e| e.to_string())
+}
+
+/// Check whether the key's directory and expected key files still exist.
+#[tauri::command]
+async fn ssh_key_files_exist(state: State<'_, AppState>, id: i64) -> Result<bool, String> {
+    let service = SshKeyService::new(state.db.clone());
+    service.key_files_exist(id).await.map_err(|e| e.to_string())
+}
+
+fn ssh_key_dto(key: deploykeys_core::models::SshKey) -> SshKeyDto {
+    SshKeyDto {
+        id: key.id,
+        directory: key.directory,
+        algorithm: key.algorithm.to_string(),
+        comment: key.comment,
+        remark: key.remark,
+        created_at: key.created_at.format("%Y-%m-%d %H:%M:%S").to_string(),
+    }
+}
+
 /// Get the active session's access token: from the in-memory cache if present,
 /// otherwise read it once from the keyring and cache it. A keyring read can
 /// trigger a macOS keychain prompt; surfacing a clear message here is what makes
@@ -332,6 +424,12 @@ pub fn run() {
             sign_out,
             list_repositories,
             sync_repositories,
+            list_ssh_keys,
+            create_ssh_key,
+            delete_ssh_key,
+            update_ssh_key,
+            get_public_key_content,
+            ssh_key_files_exist,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

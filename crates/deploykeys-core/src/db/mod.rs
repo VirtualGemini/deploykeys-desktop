@@ -7,6 +7,7 @@ use std::str::FromStr;
 pub mod account_repository;
 pub mod key_binding_repository;
 pub mod repository_repository;
+pub mod ssh_key_repository;
 pub mod target_repository;
 
 #[cfg(test)]
@@ -18,6 +19,7 @@ mod tests;
 pub use account_repository::AccountRepository;
 pub use key_binding_repository::KeyBindingRepository;
 pub use repository_repository::RepositoryRepository;
+pub use ssh_key_repository::SshKeyRepository;
 pub use target_repository::TargetRepository;
 
 const MAX_CONNECTIONS: u32 = 5;
@@ -81,6 +83,11 @@ impl Database {
     /// Get key bindings repository
     pub fn key_bindings(&self) -> KeyBindingRepository {
         KeyBindingRepository::new(self.pool.clone())
+    }
+
+    /// Get SSH keys repository
+    pub fn ssh_keys(&self) -> SshKeyRepository {
+        SshKeyRepository::new(self.pool.clone())
     }
 
     /// Read an application setting, or `None` if it has never been set.

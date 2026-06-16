@@ -10,7 +10,9 @@ pub const DEFAULT_PAGE_SIZE: usize = 5;
 const MAX_PAGE_SIZE: usize = 500;
 
 pub fn provide_page_size(initial: usize) {
-    provide_context(RwSignal::new(validate_page_size(initial).unwrap_or(DEFAULT_PAGE_SIZE)));
+    provide_context(RwSignal::new(
+        validate_page_size(initial).unwrap_or(DEFAULT_PAGE_SIZE),
+    ));
 }
 
 pub fn page_size() -> RwSignal<usize> {

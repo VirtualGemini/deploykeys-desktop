@@ -157,7 +157,12 @@ pub fn Repos(
     let paged = Signal::derive(move || {
         let size = page_size().get().max(1);
         let start = (safe_page.get() - 1) * size;
-        filtered.get().into_iter().skip(start).take(size).collect::<Vec<_>>()
+        filtered
+            .get()
+            .into_iter()
+            .skip(start)
+            .take(size)
+            .collect::<Vec<_>>()
     });
 
     // Correct the page index when the result set or page size changes.

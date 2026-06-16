@@ -4,10 +4,10 @@
 //! directly rather than pulling in a wrapper crate, so the UI builds as plain
 //! CSR wasm with no Tauri Rust dependency.
 
-use wasm_bindgen_futures::spawn_local;
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 use wasm_bindgen::prelude::*;
+use wasm_bindgen_futures::spawn_local;
 
 #[wasm_bindgen]
 extern "C" {
@@ -20,7 +20,10 @@ extern "C" {
         js_name = listen,
         catch
     )]
-    async fn listen_js(event: &str, handler: &Closure<dyn FnMut(JsValue)>) -> Result<JsValue, JsValue>;
+    async fn listen_js(
+        event: &str,
+        handler: &Closure<dyn FnMut(JsValue)>,
+    ) -> Result<JsValue, JsValue>;
 }
 
 /// Invoke a Tauri command with no arguments and deserialize its result.

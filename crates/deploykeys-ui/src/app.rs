@@ -6,6 +6,7 @@ use crate::i18n::{self, t, Locale};
 use crate::icons::{Icon, IconName};
 use crate::page_size::{self, DEFAULT_PAGE_SIZE};
 use crate::progress::ProgressHandle;
+use crate::screens::keys::Keys;
 use crate::screens::repos::Repos;
 use crate::screens::signin::SignIn;
 use crate::tauri;
@@ -523,6 +524,9 @@ fn Main(
                             AppSection::Repos => view! {
                                 <Repos account=account pending_count=pending_count on_sign_in_hint=on_sign_in_hint />
                             }.into_view(),
+                            AppSection::Keys => view! {
+                                <Keys pending_count=pending_count />
+                            }.into_view(),
                             section => view! {
                                 <PlaceholderSection section=section />
                             }.into_view(),
@@ -640,7 +644,11 @@ fn AccountAvatar(account: api::Account) -> impl IntoView {
 }
 
 #[component]
-fn SidebarDivider(#[prop(into)] collapsed: Signal<bool>, on_toggle: Callback<()>, #[prop(into)] mouse_in_sidebar: Signal<bool>) -> impl IntoView {
+fn SidebarDivider(
+    #[prop(into)] collapsed: Signal<bool>,
+    on_toggle: Callback<()>,
+    #[prop(into)] mouse_in_sidebar: Signal<bool>,
+) -> impl IntoView {
     let hovering = RwSignal::new(false);
     let button_class = move || {
         if hovering.get() || mouse_in_sidebar.get() {

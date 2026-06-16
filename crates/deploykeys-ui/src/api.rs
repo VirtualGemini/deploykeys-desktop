@@ -94,3 +94,93 @@ pub async fn list_repositories() -> Result<Vec<Repo>, String> {
 pub async fn sync_repositories() -> Result<RepoSyncResult, String> {
     invoke_no_args("sync_repositories").await
 }
+
+/// An SSH key as shown in the Keys list.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+pub struct SshKey {
+    pub id: i64,
+    pub directory: String,
+    pub algorithm: String,
+    pub comment: String,
+    pub remark: String,
+    pub created_at: String,
+}
+
+/// List all SSH keys.
+pub async fn list_ssh_keys() -> Result<Vec<SshKey>, String> {
+    invoke_no_args("list_ssh_keys").await
+}
+
+/// Create a new SSH key pair.
+pub async fn create_ssh_key(
+    directory: String,
+    algorithm: String,
+    comment: String,
+    remark: String,
+) -> Result<SshKey, String> {
+    #[derive(Serialize)]
+    #[serde(rename_all = "camelCase")]
+    struct Args {
+        directory: String,
+        algorithm: String,
+        comment: String,
+        remark: String,
+    }
+    invoke(
+        "create_ssh_key",
+        &Args {
+            directory,
+            algorithm,
+            comment,
+            remark,
+        },
+    )
+    .await
+}
+
+/// Delete an SSH key and its files.
+pub async fn delete_ssh_key(id: i64) -> Result<(), String> {
+    #[derive(Serialize)]
+    struct Args {
+        id: i64,
+    }
+    invoke("delete_ssh_key", &Args { id }).await
+}
+
+/// Edit an SSH key's directory and remark.
+pub async fn update_ssh_key(id: i64, directory: String, remark: String) -> Result<SshKey, String> {
+    #[derive(Serialize)]
+    #[serde(rename_all = "camelCase")]
+    struct Args {
+        id: i64,
+        directory: String,
+        remark: String,
+    }
+    invoke(
+        "update_ssh_key",
+        &Args {
+            id,
+            directory,
+            remark,
+        },
+    )
+    .await
+}
+
+/// Get the public key file content for copying.
+pub async fn get_public_key_content(id: i64) -> Result<String, String> {
+    #[derive(Serialize)]
+    struct Args {
+        id: i64,
+    }
+    invoke("get_public_key_content", &Args { id }).await
+}
+
+/// Check whether the key directory and expected key files still exist.
+pub async fn ssh_key_files_exist(id: i64) -> Result<bool, String> {
+    #[derive(Serialize)]
+    struct Args {
+        id: i64,
+    }
+    invoke("ssh_key_files_exist", &Args { id }).await
+}
