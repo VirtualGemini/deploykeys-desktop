@@ -11,6 +11,7 @@ use crate::i18n::t;
 use crate::icons::{Icon, IconName};
 use crate::page_size::page_size;
 use crate::progress::ProgressHandle;
+use crate::screens::keys::FormSelectDropdown;
 use leptos::*;
 use wasm_bindgen::JsCast;
 use wasm_bindgen_futures::spawn_local;
@@ -527,26 +528,38 @@ fn BindKeyDialog(
             repo.set(None);
         }
     };
-    let repo_name = Signal::derive(move || {
-        repo.get()
-            .map(|repo| repo.full_name)
-            .unwrap_or_else(String::new)
+    let cached_repo_name = RwSignal::new(String::new());
+    create_effect(move |_| {
+        if let Some(repo) = repo.get() {
+            cached_repo_name.set(repo.full_name);
+        }
     });
 
     view! {
-        <Show when=move || repo.get().is_some()>
             <div
-                class="fixed inset-0 z-[100] bg-black/50 backdrop-blur-sm flex items-center justify-center px-4"
+                class=move || {
+                    if repo.get().is_some() {
+                        "fixed inset-0 z-[100] bg-black/50 backdrop-blur-sm flex items-center justify-center px-4 opacity-100 transition-opacity duration-300"
+                    } else {
+                        "fixed inset-0 z-[100] bg-black/50 backdrop-blur-sm flex items-center justify-center px-4 opacity-0 pointer-events-none transition-opacity duration-300"
+                    }
+                }
                 on:click=move |_| close()
             >
                 <div
-                    class="w-full max-w-xl bg-surface border border-border rounded-xl shadow-2xl overflow-hidden"
+                    class=move || {
+                        if repo.get().is_some() {
+                            "w-full max-w-xl bg-surface border border-border rounded-xl shadow-2xl overflow-visible scale-100 transition-transform duration-300"
+                        } else {
+                            "w-full max-w-xl bg-surface border border-border rounded-xl shadow-2xl overflow-visible scale-95 transition-transform duration-300"
+                        }
+                    }
                     on:click=|ev| ev.stop_propagation()
                 >
                     <div class="flex items-start justify-between gap-4 px-6 py-5">
                         <div class="min-w-0">
                             <h2 class="text-base font-semibold text-content">{move || t("repos.bind_dialog_title")}</h2>
-                            <p class="mt-1 text-sm text-muted truncate">{move || repo_name.get()}</p>
+                            <p class="mt-1 text-sm text-muted truncate">{move || cached_repo_name.get()}</p>
                         </div>
                         <button
                             type="button"
@@ -581,74 +594,61 @@ fn BindKeyDialog(
                                         </p>
                                     }
                                 >
-                                    <div class="max-h-64 overflow-y-auto rounded-lg border border-border bg-bg p-1">
-                                        <For
-                                            each=move || keys.get()
-                                            key=|key| key.id
-                                            children=move |key| {
-                                                let key_id = key.id;
-                                                let directory = key.directory.clone();
-                                                let algorithm = key.algorithm.clone();
-                                                let remark = key.remark.clone();
-                                                view! {
-                                                    <button
-                                                        type="button"
-                                                        class=move || {
-                                                            if selected_key.get() == Some(key_id) {
-                                                                "w-full flex items-center gap-3 rounded-md px-3 py-2 text-left bg-primary-soft text-content"
-                                                            } else {
-                                                                "w-full flex items-center gap-3 rounded-md px-3 py-2 text-left text-content hover:bg-surface"
-                                                            }
-                                                        }
-                                                        prop:disabled=move || submitting.get()
-                                                        on:click=move |_| selected_key.set(Some(key_id))
-                                                    >
-                                                        <span class=move || {
-                                                            if selected_key.get() == Some(key_id) {
-                                                                "inline-flex size-4 shrink-0 items-center justify-center rounded-full border border-primary bg-primary text-on-primary"
-                                                            } else {
-                                                                "inline-flex size-4 shrink-0 items-center justify-center rounded-full border border-border"
-                                                            }
-                                                        }>
-                                                            <Show when=move || selected_key.get() == Some(key_id)>
-                                                                <Icon name=IconName::Check class="size-3" />
-                                                            </Show>
-                                                        </span>
-                                                        <span class="min-w-0 grow">
-                                                            <span class="block truncate text-sm font-medium font-mono">{directory.clone()}</span>
-                                                            <span class="block truncate text-xs text-muted">
-                                                                {if remark.is_empty() { algorithm.clone() } else { format!("{algorithm} · {remark}") }}
-                                                            </span>
-                                                        </span>
-                                                    </button>
-                                                }
+                                    <FormSelectDropdown
+                                        options=Signal::derive(move || {
+                                            keys.get()
+                                                .into_iter()
+                                                .map(|key| (key.id.to_string(), key.directory.clone()))
+                                                .collect::<Vec<_>>()
+                                        })
+                                        selected=Signal::derive(move || {
+                                            selected_key.get().map(|id| id.to_string()).unwrap_or_default()
+                                        })
+                                        on_select=Callback::new(move |value: String| {
+                                            if let Ok(id) = value.parse::<i64>() {
+                                                selected_key.set(Some(id));
                                             }
-                                        />
-                                    </div>
+                                        })
+                                        disabled=Signal::derive(move || repo.get().is_none() || submitting.get())
+                                    />
                                 </Show>
                             </Show>
                         </div>
 
-                        <label class="flex items-center justify-between gap-4 rounded-lg border border-border bg-bg px-3 py-3">
-                            <span class="min-w-0">
-                                <span class="block text-sm font-medium text-content">{move || t("repos.bind_dialog_writable")}</span>
-                                <span class="block text-xs text-muted">{move || t("repos.bind_dialog_writable_help")}</span>
-                            </span>
-                            <input
-                                type="checkbox"
-                                class="size-4 accent-primary"
-                                prop:checked=move || writable.get()
-                                prop:disabled=move || submitting.get()
-                                on:change=move |ev| {
-                                    let checked = ev
-                                        .target()
-                                        .and_then(|target| target.dyn_into::<web_sys::HtmlInputElement>().ok())
-                                        .map(|input| input.checked())
-                                        .unwrap_or(false);
-                                    writable.set(checked);
-                                }
+                        <div>
+                            <FieldLabelWithHelp
+                                label=Signal::derive(move || t("repos.bind_dialog_authorization_label"))
+                                help=Signal::derive(move || t("repos.bind_dialog_authorization_help"))
                             />
-                        </label>
+                            <div class="grid grid-cols-2 gap-2">
+                                <label class="flex items-center justify-between gap-3 rounded-lg border border-border bg-bg px-3 py-3">
+                                    <span class="min-w-0 truncate text-sm font-medium text-content">{move || t("repos.bind_dialog_pull")}</span>
+                                    <input
+                                        type="checkbox"
+                                        class="size-4 shrink-0 accent-primary"
+                                        prop:checked=true
+                                        prop:disabled=true
+                                    />
+                                </label>
+                                <label class="flex items-center justify-between gap-3 rounded-lg border border-border bg-bg px-3 py-3">
+                                    <span class="min-w-0 truncate text-sm font-medium text-content">{move || t("repos.bind_dialog_push")}</span>
+                                    <input
+                                        type="checkbox"
+                                        class="size-4 shrink-0 accent-primary"
+                                        prop:checked=move || writable.get()
+                                        prop:disabled=move || submitting.get()
+                                        on:change=move |ev| {
+                                            let checked = ev
+                                                .target()
+                                                .and_then(|target| target.dyn_into::<web_sys::HtmlInputElement>().ok())
+                                                .map(|input| input.checked())
+                                                .unwrap_or(false);
+                                            writable.set(checked);
+                                        }
+                                    />
+                                </label>
+                            </div>
+                        </div>
                     </div>
 
                     <div class="flex justify-end gap-2 px-6 py-4 border-t border-border">
@@ -671,7 +671,32 @@ fn BindKeyDialog(
                     </div>
                 </div>
             </div>
-        </Show>
+    }
+}
+
+#[component]
+fn FieldLabelWithHelp(
+    #[prop(into)] label: Signal<&'static str>,
+    #[prop(into)] help: Signal<&'static str>,
+) -> impl IntoView {
+    view! {
+        <div class="mb-2 flex items-center gap-1.5">
+            <label class="text-sm font-medium text-content">
+                {move || label.get()}
+            </label>
+            <span class="group/help relative inline-flex">
+                <button
+                    type="button"
+                    class="inline-flex size-4 items-center justify-center rounded-full border border-border text-[10px] font-semibold leading-none text-muted hover:border-primary hover:text-primary focus:outline-none focus:ring-1 focus:ring-primary"
+                    aria-label=move || help.get()
+                >
+                    "?"
+                </button>
+                <span class="pointer-events-none absolute bottom-full left-1/2 z-[80] mb-2 hidden w-[min(22rem,calc(100vw-3rem))] -translate-x-1/2 whitespace-normal break-words rounded-lg border border-border bg-surface px-3 py-2 text-left text-xs leading-5 text-content shadow-xl group-hover/help:block group-focus-within/help:block">
+                    {move || help.get()}
+                </span>
+            </span>
+        </div>
     }
 }
 

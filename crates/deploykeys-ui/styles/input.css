@@ -66,6 +66,21 @@
   }
 }
 
+/* Custom scrollbars are hidden everywhere, in all states — they never appear,
+   so there's no chance of a second (custom) scrollbar competing with the native
+   one. Scrolling still works via the native scrollbar, trackpad, wheel, and the
+   drag-to-scroll (cursor-grab) affordance on tables. */
+@layer base {
+  * {
+    scrollbar-width: none;
+  }
+  ::-webkit-scrollbar {
+    width: 0;
+    height: 0;
+    display: none;
+  }
+}
+
 @layer utilities {
   /* The single header progress line. Width is driven inline by the component
      (aggregate percent while running, 100 % while completing); opacity is
@@ -94,5 +109,4 @@
     filter: brightness(1.24) contrast(1.16) saturate(1.18)
       drop-shadow(0 10px 18px color-mix(in oklab, var(--color-primary) 28%, transparent));
   }
-
 }

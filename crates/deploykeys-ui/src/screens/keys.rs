@@ -10,6 +10,7 @@ use crate::icons::{Icon, IconName};
 use crate::page_size::page_size;
 use crate::progress::ProgressHandle;
 use leptos::*;
+use std::time::Duration;
 use wasm_bindgen::JsCast;
 use wasm_bindgen_futures::spawn_local;
 
@@ -26,6 +27,12 @@ struct TableDragState {
 enum CreatedAtSort {
     Desc,
     Asc,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum CopyIconState {
+    Copy,
+    Copied,
 }
 
 #[component]
@@ -183,41 +190,59 @@ pub fn Keys(#[allow(unused_variables)] pending_count: RwSignal<usize>) -> impl I
         }
     };
 
-    let copy_public_key = move |id: i64| {
-        let sim = progress.begin_simulated();
-        spawn_local(async move {
-            match api::ssh_key_files_exist(id).await {
-                Ok(true) => {}
-                Ok(false) => {
-                    missing_key_confirm.set(Some(id));
-                    progress.end_simulated(&sim);
-                    return;
-                }
-                Err(e) => {
-                    error.set(Some(e));
-                    progress.end_simulated(&sim);
-                    return;
-                }
+    let copy_public_key =
+        move |id: i64, icon_state: RwSignal<CopyIconState>, busy: RwSignal<bool>| {
+            if busy.get_untracked() {
+                return;
             }
 
-            match api::get_public_key_content(id).await {
-                Ok(content) => {
-                    // Copy to clipboard using the Clipboard API
-                    if let Some(window) = web_sys::window() {
-                        let navigator = window.navigator().clipboard();
-                        let promise = navigator.write_text(&content);
-                        let _ = wasm_bindgen_futures::JsFuture::from(promise).await;
-                        leptos::logging::log!("Public key copied to clipboard");
-                    }
-                }
-                Err(e) => {
-                    leptos::logging::error!("Failed to read public key: {}", e);
-                    error.set(Some(e));
-                }
-            }
-            progress.end_simulated(&sim);
-        });
-    };
+            busy.set(true);
+            icon_state.set(CopyIconState::Copied);
+
+            set_timeout(
+                move || {
+                    let sim = progress.begin_simulated();
+                    icon_state.set(CopyIconState::Copy);
+
+                    spawn_local(async move {
+                        match api::ssh_key_files_exist(id).await {
+                            Ok(true) => {}
+                            Ok(false) => {
+                                missing_key_confirm.set(Some(id));
+                                progress.end_simulated(&sim);
+                                busy.set(false);
+                                return;
+                            }
+                            Err(e) => {
+                                error.set(Some(e));
+                                progress.end_simulated(&sim);
+                                busy.set(false);
+                                return;
+                            }
+                        }
+
+                        match api::get_public_key_content(id).await {
+                            Ok(content) => {
+                                // Copy to clipboard using the Clipboard API
+                                if let Some(window) = web_sys::window() {
+                                    let navigator = window.navigator().clipboard();
+                                    let promise = navigator.write_text(&content);
+                                    let _ = wasm_bindgen_futures::JsFuture::from(promise).await;
+                                    leptos::logging::log!("Public key copied to clipboard");
+                                }
+                            }
+                            Err(e) => {
+                                leptos::logging::error!("Failed to read public key: {}", e);
+                                error.set(Some(e));
+                            }
+                        }
+                        progress.end_simulated(&sim);
+                        busy.set(false);
+                    });
+                },
+                Duration::from_secs(1),
+            );
+        };
 
     let delete_key = move |id: i64| {
         let sim = progress.begin_simulated();
@@ -405,6 +430,8 @@ pub fn Keys(#[allow(unused_variables)] pending_count: RwSignal<usize>) -> impl I
                                                     let remark_for_dialog = remark.clone();
                                                     let delete_confirm_open = RwSignal::new(false);
                                                     let edit_open = RwSignal::new(false);
+                                                    let copy_icon_state = RwSignal::new(CopyIconState::Copy);
+                                                    let copy_busy = RwSignal::new(false);
                                                     view! {
                                                         <tr class="group border-b border-border last:border-b-0 hover:bg-bg align-middle">
                                                             <td class="w-[8rem] min-w-[8rem] max-w-[8rem] px-3 py-2 align-middle">
@@ -438,12 +465,31 @@ pub fn Keys(#[allow(unused_variables)] pending_count: RwSignal<usize>) -> impl I
                                                                 <div class="inline-flex min-w-max items-center gap-1.5">
                                                                     <button
                                                                         type="button"
-                                                                        title=move || t("keys.copy_public_key")
-                                                                        aria-label=move || t("keys.copy_public_key")
-                                                                        class="inline-flex items-center justify-center size-8 rounded-md text-primary hover:bg-primary-soft focus:outline-none"
-                                                                        on:click=move |_| copy_public_key(key_id)
+                                                                        title=move || {
+                                                                            if copy_icon_state.get() == CopyIconState::Copied {
+                                                                                t("keys.copy_success")
+                                                                            } else {
+                                                                                t("keys.copy_public_key")
+                                                                            }
+                                                                        }
+                                                                        aria-label=move || {
+                                                                            if copy_icon_state.get() == CopyIconState::Copied {
+                                                                                t("keys.copy_success")
+                                                                            } else {
+                                                                                t("keys.copy_public_key")
+                                                                            }
+                                                                        }
+                                                                        class=move || {
+                                                                            if copy_icon_state.get() == CopyIconState::Copied {
+                                                                                "inline-flex items-center justify-center size-8 rounded-md text-emerald-600 hover:bg-primary-soft dark:text-emerald-400 dark:hover:bg-primary-soft/60 focus:outline-none transition-colors disabled:pointer-events-none disabled:opacity-100"
+                                                                            } else {
+                                                                                "inline-flex items-center justify-center size-8 rounded-md text-primary hover:bg-primary-soft focus:outline-none transition-colors disabled:pointer-events-none disabled:opacity-100"
+                                                                            }
+                                                                        }
+                                                                        prop:disabled=move || copy_busy.get()
+                                                                        on:click=move |_| copy_public_key(key_id, copy_icon_state, copy_busy)
                                                                     >
-                                                                        <Icon name=IconName::Copy class="size-4" />
+                                                                        <CopyPublicKeyIcon state=copy_icon_state />
                                                                     </button>
                                                                     <button
                                                                         type="button"
@@ -580,6 +626,32 @@ pub fn Keys(#[allow(unused_variables)] pending_count: RwSignal<usize>) -> impl I
 }
 
 #[component]
+fn CopyPublicKeyIcon(state: RwSignal<CopyIconState>) -> impl IntoView {
+    view! {
+        <span class="relative inline-flex size-4 items-center justify-center">
+            <span class=move || {
+                if state.get() == CopyIconState::Copy {
+                    "absolute inset-0 inline-flex items-center justify-center opacity-100 scale-100 rotate-0 transition-all duration-200 ease-out"
+                } else {
+                    "absolute inset-0 inline-flex items-center justify-center opacity-0 scale-75 -rotate-45 transition-all duration-200 ease-out"
+                }
+            }>
+                <Icon name=IconName::Copy class="size-4" />
+            </span>
+            <span class=move || {
+                if state.get() == CopyIconState::Copied {
+                    "absolute inset-0 inline-flex items-center justify-center opacity-100 scale-100 rotate-0 transition-all duration-200 ease-out"
+                } else {
+                    "absolute inset-0 inline-flex items-center justify-center opacity-0 scale-75 rotate-45 transition-all duration-200 ease-out"
+                }
+            }>
+                <Icon name=IconName::CopyDone class="size-4" />
+            </span>
+        </span>
+    }
+}
+
+#[component]
 fn TruncatedCellText(
     #[prop(into)] display: String,
     #[prop(optional, into)] tooltip: String,
@@ -699,13 +771,18 @@ fn FilterDropdown(
 }
 
 #[component]
-fn FormSelectDropdown(
+pub fn FormSelectDropdown(
     #[prop(into)] options: Signal<Vec<(String, String)>>,
     #[prop(into)] selected: Signal<String>,
     on_select: Callback<String>,
     #[prop(optional, into)] disabled: Signal<bool>,
 ) -> impl IntoView {
     let open = RwSignal::new(false);
+    create_effect(move |_| {
+        if disabled.get() {
+            open.set(false);
+        }
+    });
 
     let label = Signal::derive(move || {
         let selected_value = selected.get();
