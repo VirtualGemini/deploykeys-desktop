@@ -1,10 +1,49 @@
-<svg width="1024" height="1024" viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg">
-  <rect width="1024" height="1024" rx="220" fill="#2563eb"/>
-  <g fill="none" stroke="#ffffff" stroke-width="56" stroke-linecap="round" stroke-linejoin="round">
-    <circle cx="420" cy="512" r="150"/>
-    <line x1="540" y1="512" x2="800" y2="512"/>
-    <line x1="800" y1="512" x2="800" y2="624"/>
-    <line x1="700" y1="512" x2="700" y2="600"/>
+<svg width="1024" height="1024" viewBox="0 0 1024 1024" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="bg" x1="150" y1="110" x2="900" y2="930" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#3b82f6"/>
+      <stop offset="0.5" stop-color="#2563eb"/>
+      <stop offset="1" stop-color="#1e40af"/>
+    </linearGradient>
+    <radialGradient id="topGlow" cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse" gradientTransform="translate(245 185) rotate(46) scale(680 520)">
+      <stop stop-color="#ffffff" stop-opacity="0.08"/>
+      <stop offset="0.58" stop-color="#ffffff" stop-opacity="0.02"/>
+      <stop offset="1" stop-color="#ffffff" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="bottomShade" x1="512" y1="360" x2="512" y2="936" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#0f172a" stop-opacity="0"/>
+      <stop offset="1" stop-color="#0f172a" stop-opacity="0.18"/>
+    </linearGradient>
+    <linearGradient id="rim" x1="160" y1="95" x2="870" y2="930" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#ffffff" stop-opacity="0.24"/>
+      <stop offset="0.48" stop-color="#ffffff" stop-opacity="0.05"/>
+      <stop offset="1" stop-color="#0f172a" stop-opacity="0.14"/>
+    </linearGradient>
+    <clipPath id="tileClip">
+      <rect x="88" y="88" width="848" height="848" rx="255"/>
+    </clipPath>
+  </defs>
+  <rect x="96" y="110" width="832" height="828" rx="250" fill="#0f172a" opacity="0.16"/>
+  <g>
+    <rect x="88" y="88" width="848" height="848" rx="255" fill="url(#bg)"/>
+    <g clip-path="url(#tileClip)">
+      <rect x="88" y="88" width="848" height="848" rx="255" fill="url(#topGlow)"/>
+      <rect x="88" y="88" width="848" height="848" rx="255" fill="url(#bottomShade)"/>
+    </g>
+    <rect x="90" y="90" width="844" height="844" rx="253" stroke="url(#rim)" stroke-width="4"/>
   </g>
-  <circle cx="420" cy="512" r="56" fill="#ffffff"/>
+  <g transform="translate(248 282) scale(22)" stroke="#0f172a" stroke-opacity="0.2" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+    <circle cx="7.5" cy="15.5" r="4.5"/>
+    <circle cx="7.5" cy="15.5" r="1.5"/>
+    <path d="M10.7 12.3 21 2"/>
+    <path d="m16 6 3 3"/>
+    <path d="m13 9 3 3"/>
+  </g>
+  <g transform="translate(248 270) scale(22)" stroke="#ffffff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+    <circle cx="7.5" cy="15.5" r="4.5"/>
+    <circle cx="7.5" cy="15.5" r="1.5"/>
+    <path d="M10.7 12.3 21 2"/>
+    <path d="m16 6 3 3"/>
+    <path d="m13 9 3 3"/>
+  </g>
 </svg>

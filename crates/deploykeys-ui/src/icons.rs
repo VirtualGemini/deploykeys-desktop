@@ -7,7 +7,6 @@ use leptos::*;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum IconName {
-    Brand,
     Check,
     ChevronLeft,
     ChevronRight,
@@ -36,7 +35,6 @@ pub enum IconName {
 impl IconName {
     pub const fn src(self) -> &'static str {
         match self {
-            IconName::Brand => "assets/images/svg/icons/brand.svg",
             IconName::Check => "assets/images/svg/icons/check.svg",
             IconName::ChevronLeft => "assets/images/svg/icons/chevron-left.svg",
             IconName::ChevronRight => "assets/images/svg/icons/chevron-right.svg",
@@ -65,7 +63,6 @@ impl IconName {
 
     const fn svg(self) -> &'static str {
         match self {
-            IconName::Brand => include_str!("../assets/images/svg/icons/brand.svg"),
             IconName::Check => include_str!("../assets/images/svg/icons/check.svg"),
             IconName::ChevronLeft => include_str!("../assets/images/svg/icons/chevron-left.svg"),
             IconName::ChevronRight => include_str!("../assets/images/svg/icons/chevron-right.svg"),

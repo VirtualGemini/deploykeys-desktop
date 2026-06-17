@@ -306,11 +306,8 @@ fn Main(
                 data-tauri-drag-region=""
                 class="flex items-center shrink-0 h-14 pl-20 pr-4 gap-3 bg-surface select-none"
             >
-                // Brand: mark + product name, right next to the traffic lights.
-                <div class="flex items-center gap-2.5 pointer-events-none">
-                    <div class="flex items-center justify-center size-9 rounded-lg bg-primary text-on-primary shrink-0">
-                        <Icon name=IconName::Brand class="size-5" />
-                    </div>
+                // Brand text, right next to the traffic lights.
+                <div class="flex items-center gap-1 ml-3 pointer-events-none">
                     <span class="text-lg font-semibold leading-none text-content whitespace-nowrap">{move || t("app.brand")}</span>
                 </div>
 
