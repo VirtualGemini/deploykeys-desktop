@@ -700,7 +700,7 @@ fn TruncatedCellText(
 }
 
 #[component]
-fn FilterDropdown(
+pub fn FilterDropdown(
     #[prop(into)] options: Signal<Vec<(String, String)>>,
     #[prop(into)] selected: Signal<String>,
     on_select: Callback<String>,
@@ -1285,7 +1285,7 @@ const PAGER_CELL: &str = "inline-flex items-center justify-center min-w-[2rem] h
 /// Full pagination bar below the list: total, prev/next with page indicator,
 /// page-size, and "go to page" input. Kept in sync with the Repos page.
 #[component]
-fn PaginationBar(
+pub fn PaginationBar(
     page: RwSignal<usize>,
     page_count: Signal<usize>,
     total: Signal<usize>,

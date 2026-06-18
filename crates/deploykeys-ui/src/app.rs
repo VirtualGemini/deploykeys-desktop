@@ -2,10 +2,12 @@
 //! drives Personal Access Token sign-in.
 
 use crate::api;
+use crate::connection;
 use crate::i18n::{self, t, Locale};
 use crate::icons::{Icon, IconName};
 use crate::page_size::{self, DEFAULT_PAGE_SIZE};
 use crate::progress::ProgressHandle;
+use crate::screens::connect::Connect;
 use crate::screens::keys::Keys;
 use crate::screens::repos::Repos;
 use crate::screens::signin::SignIn;
@@ -78,6 +80,7 @@ pub fn App() -> impl IntoView {
     i18n::provide_locale(detect_locale());
     theme::provide_theme(Theme::System);
     page_size::provide_page_size(DEFAULT_PAGE_SIZE);
+    connection::provide_connection_state();
 
     let screen = RwSignal::new(Screen::Main);
     let signing_in = RwSignal::new(false);
@@ -520,11 +523,11 @@ fn Main(
                             AppSection::Repos => view! {
                                 <Repos account=account pending_count=pending_count on_sign_in_hint=on_sign_in_hint />
                             }.into_view(),
+                            AppSection::Connect => view! {
+                                <Connect pending_count=pending_count />
+                            }.into_view(),
                             AppSection::Keys => view! {
                                 <Keys pending_count=pending_count />
-                            }.into_view(),
-                            section => view! {
-                                <PlaceholderSection section=section />
                             }.into_view(),
                         }}
                     </div>
@@ -604,18 +607,6 @@ fn NavItem(
                 <Icon name=icon class="size-4" />
                 <span class=label_class>{move || label.get()}</span>
             </button>
-        </div>
-    }
-}
-
-#[component]
-fn PlaceholderSection(section: AppSection) -> impl IntoView {
-    view! {
-        <div class="flex flex-col gap-5 h-full">
-            <h1 class="text-2xl font-semibold text-content">{move || t(section.label_key())}</h1>
-            <div class="flex flex-1 items-center justify-center py-16 text-center">
-                <p class="text-sm text-muted">{move || t("screen.placeholder_phase4")}</p>
-            </div>
         </div>
     }
 }

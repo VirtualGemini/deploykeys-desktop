@@ -1,5 +1,6 @@
 mod api;
 mod app;
+mod connection;
 mod i18n;
 mod icons;
 mod page_size;
