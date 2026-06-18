@@ -363,10 +363,14 @@ pub fn Repos(
         bind_error.set(None);
         notice.set(None);
         let writable = bind_writable.get_untracked();
+        let success = t("repos.bind_success").to_string();
         let sim = progress.begin_simulated();
         spawn_local(async move {
             match api::bind_deploy_key(repo.id, ssh_key_id, writable).await {
-                Ok(()) => bind_repo.set(None),
+                Ok(()) => {
+                    bind_repo.set(None);
+                    notice.set(Some(success));
+                }
                 Err(e) => bind_error.set(Some(e)),
             }
             bind_submitting.set(false);

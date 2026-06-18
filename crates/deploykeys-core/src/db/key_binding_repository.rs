@@ -227,6 +227,46 @@ impl KeyBindingRepository {
         Ok(())
     }
 
+    /// Replace a stale binding row with a newly uploaded deploy key while
+    /// preserving the row id used by the UI.
+    pub async fn replace(&self, binding: &KeyBinding) -> Result<()> {
+        let algorithm = binding.algorithm.to_string();
+        let permission = binding.permission.to_string();
+        let residency = binding.private_key_residency.to_string();
+        let status = binding.status.to_string();
+        let created_at = binding.created_at.timestamp();
+        let last_verified_at = binding.last_verified_at.map(|t| t.timestamp());
+
+        sqlx::query!(
+            r#"
+            UPDATE key_bindings
+            SET repo_id = ?, target_id = ?, github_deploy_key_id = ?, deploy_key_title = ?,
+                algorithm = ?, permission = ?, public_key = ?, public_key_fingerprint = ?,
+                private_key_path = ?, private_key_residency = ?, status = ?,
+                created_at = ?, last_verified_at = ?
+            WHERE id = ?
+            "#,
+            binding.repo_id,
+            binding.target_id,
+            binding.github_deploy_key_id,
+            binding.deploy_key_title,
+            algorithm,
+            permission,
+            binding.public_key,
+            binding.public_key_fingerprint,
+            binding.private_key_path,
+            residency,
+            status,
+            created_at,
+            last_verified_at,
+            binding.id
+        )
+        .execute(&self.pool)
+        .await?;
+
+        Ok(())
+    }
+
     pub async fn delete(&self, id: i64) -> Result<()> {
         sqlx::query!("DELETE FROM key_bindings WHERE id = ?", id)
             .execute(&self.pool)

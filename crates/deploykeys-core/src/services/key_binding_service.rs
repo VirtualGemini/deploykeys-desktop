@@ -47,18 +47,6 @@ impl KeyBindingService {
         key_path: PathBuf,
         title: String,
     ) -> Result<KeyBinding> {
-        if self
-            .db
-            .key_bindings()
-            .find_by_repo_and_target(repo_id, target_id)
-            .await?
-            .is_some()
-        {
-            return Err(Error::AlreadyExists(
-                "Key binding already exists for this repository and target".into(),
-            ));
-        }
-
         // Resolve credentials first so we fail before touching the filesystem.
         let account = self
             .db
@@ -67,6 +55,9 @@ impl KeyBindingService {
             .await?
             .ok_or_else(|| Error::NotFound("Account not found".into()))?;
         let token = get_token_blocking(account.token_ref).await?;
+        let stale_binding = self
+            .stale_binding_slot(&token, owner, repo_name, repo_id, target_id)
+            .await?;
 
         if let Some(parent) = key_path.parent() {
             ensure_private_dir(parent).await?;
@@ -118,11 +109,14 @@ impl KeyBindingService {
             last_verified_at: Some(Utc::now()),
         };
 
-        match self.db.key_bindings().create(&binding).await {
-            Ok(id) => Ok(KeyBinding { id, ..binding }),
+        match self
+            .save_uploaded_binding(binding, stale_binding.as_ref())
+            .await
+        {
+            Ok(binding) => Ok(binding),
             Err(e) => {
                 tracing::warn!(
-                    "Binding insert failed; rolling back deploy key {} on {}/{}",
+                    "Binding save failed; rolling back deploy key {} on {}/{}",
                     deploy_key.id,
                     owner,
                     repo_name
@@ -168,18 +162,9 @@ impl KeyBindingService {
             .find_by_id(ssh_key_id)
             .await?
             .ok_or_else(|| Error::NotFound("SSH key not found".into()))?;
-
-        if self
-            .db
-            .key_bindings()
-            .find_by_repo_and_target(repo.id, ssh_key.target_id)
-            .await?
-            .is_some()
-        {
-            return Err(Error::AlreadyExists(
-                "Key binding already exists for this repository and target".into(),
-            ));
-        }
+        let stale_binding = self
+            .stale_binding_slot(token, &repo.owner, &repo.name, repo.id, ssh_key.target_id)
+            .await?;
 
         if !tokio::fs::try_exists(&ssh_key.private_key_path)
             .await
@@ -230,9 +215,11 @@ impl KeyBindingService {
             last_verified_at: Some(Utc::now()),
         };
 
-        match self.db.key_bindings().create(&binding).await {
-            Ok(id) => {
-                let binding = KeyBinding { id, ..binding };
+        match self
+            .save_uploaded_binding(binding, stale_binding.as_ref())
+            .await
+        {
+            Ok(binding) => {
                 if let Err(e) = ensure_repo_ssh_config(&repo, &binding).await {
                     tracing::warn!(
                         "SSH config update failed; rolling back deploy key {} on {}/{}",
@@ -266,7 +253,7 @@ impl KeyBindingService {
             }
             Err(e) => {
                 tracing::warn!(
-                    "Binding insert failed; rolling back deploy key {} on {}/{}",
+                    "Binding save failed; rolling back deploy key {} on {}/{}",
                     deploy_key.id,
                     repo.owner,
                     repo.name
@@ -346,6 +333,78 @@ impl KeyBindingService {
             .await?;
 
         Ok(healthy)
+    }
+
+    async fn stale_binding_slot(
+        &self,
+        token: &str,
+        owner: &str,
+        repo_name: &str,
+        repo_id: i64,
+        target_id: i64,
+    ) -> Result<Option<KeyBinding>> {
+        let Some(binding) = self
+            .db
+            .key_bindings()
+            .find_by_repo_and_target(repo_id, target_id)
+            .await?
+        else {
+            return Ok(None);
+        };
+
+        if self
+            .remote_binding_exists(token, owner, repo_name, &binding)
+            .await?
+        {
+            return Err(Error::AlreadyExists(
+                "Key binding already exists for this repository and target".into(),
+            ));
+        }
+
+        tracing::info!(
+            "Replacing stale key binding {} for repository {} and target {}",
+            binding.id,
+            repo_id,
+            target_id
+        );
+
+        Ok(Some(binding))
+    }
+
+    async fn remote_binding_exists(
+        &self,
+        token: &str,
+        owner: &str,
+        repo_name: &str,
+        binding: &KeyBinding,
+    ) -> Result<bool> {
+        let Some(deploy_key_id) = binding.github_deploy_key_id else {
+            return Ok(false);
+        };
+
+        let keys = self
+            .github
+            .list_deploy_keys(token, owner, repo_name)
+            .await?;
+        Ok(keys.iter().any(|key| key.id == deploy_key_id))
+    }
+
+    async fn save_uploaded_binding(
+        &self,
+        binding: KeyBinding,
+        stale_binding: Option<&KeyBinding>,
+    ) -> Result<KeyBinding> {
+        if let Some(stale_binding) = stale_binding {
+            let binding = KeyBinding {
+                id: stale_binding.id,
+                ..binding
+            };
+            self.db.key_bindings().replace(&binding).await?;
+            return Ok(binding);
+        }
+
+        let id = self.db.key_bindings().create(&binding).await?;
+        Ok(KeyBinding { id, ..binding })
     }
 }
 
@@ -612,7 +671,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn duplicate_binding_is_rejected_before_side_effects() {
+    async fn duplicate_binding_is_rejected_when_remote_key_still_exists() {
         use_mock_keyring();
         let (_dir, db) = test_db().await;
         let (account_id, repo_id, target_id) = seeded(&db).await;
@@ -636,7 +695,17 @@ mod tests {
         };
         db.key_bindings().create(&binding).await.unwrap();
 
-        let server = mockito::Server::new_async().await;
+        let mut server = mockito::Server::new_async().await;
+        let remote_key = server
+            .mock("GET", "/repos/owner/repo/keys")
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(
+                r#"[{"id": 1, "key": "k", "url": "u", "title": "existing",
+                    "verified": true, "created_at": "now", "read_only": true}]"#,
+            )
+            .create_async()
+            .await;
         let github = GitHubClient::new().unwrap().with_base_url(server.url());
         let service = KeyBindingService::with_github_client(db.clone(), github);
 
@@ -655,7 +724,91 @@ mod tests {
             .await
             .unwrap_err();
 
+        remote_key.assert_async().await;
         assert!(matches!(error, Error::AlreadyExists(_)));
+    }
+
+    #[tokio::test]
+    async fn stale_local_binding_is_replaced_when_remote_key_is_missing() {
+        use_mock_keyring();
+        let (_dir, db) = test_db().await;
+        let (account_id, repo_id, target_id) = seeded(&db).await;
+        CredentialStore::store_token("seeded", "ghu_seeded_token").unwrap();
+
+        let stale = KeyBinding {
+            id: 0,
+            repo_id,
+            target_id,
+            github_deploy_key_id: Some(1),
+            deploy_key_title: "stale".to_string(),
+            algorithm: KeyAlgorithm::Ed25519,
+            permission: DeployKeyPermission::ReadOnly,
+            public_key: "old-public-key".to_string(),
+            public_key_fingerprint: "old-fingerprint".to_string(),
+            private_key_path: "/tmp/stale".to_string(),
+            private_key_residency: KeyResidency::Local,
+            status: KeyBindingStatus::Active,
+            created_at: Utc::now(),
+            last_verified_at: None,
+        };
+        let stale_id = db.key_bindings().create(&stale).await.unwrap();
+
+        let mut server = mockito::Server::new_async().await;
+        let list = server
+            .mock("GET", "/repos/owner/repo/keys")
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body("[]")
+            .create_async()
+            .await;
+        let upload = server
+            .mock("POST", "/repos/owner/repo/keys")
+            .with_status(201)
+            .with_header("content-type", "application/json")
+            .with_body(
+                r#"{"id": 77, "key": "k", "url": "u", "title": "replacement",
+                    "verified": true, "created_at": "now", "read_only": true}"#,
+            )
+            .create_async()
+            .await;
+
+        let github = GitHubClient::new().unwrap().with_base_url(server.url());
+        let service = KeyBindingService::with_github_client(db.clone(), github);
+
+        let key_dir = tempfile::TempDir::new().unwrap();
+        let key_path = key_dir.path().join("id_ed25519");
+        let binding = service
+            .create_and_upload_key(
+                account_id,
+                repo_id,
+                target_id,
+                "owner",
+                "repo",
+                KeyAlgorithm::Ed25519,
+                DeployKeyPermission::ReadOnly,
+                key_path.clone(),
+                "replacement".to_string(),
+            )
+            .await
+            .unwrap();
+
+        list.assert_async().await;
+        upload.assert_async().await;
+        assert_eq!(binding.id, stale_id);
+        assert_eq!(binding.github_deploy_key_id, Some(77));
+        assert_eq!(binding.status, KeyBindingStatus::Active);
+        assert_eq!(binding.private_key_path, key_path.to_string_lossy());
+        assert_ne!(binding.public_key, "old-public-key");
+
+        let stored = db
+            .key_bindings()
+            .find_by_repo_and_target(repo_id, target_id)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(stored.id, stale_id);
+        assert_eq!(stored.github_deploy_key_id, Some(77));
+        assert_eq!(stored.deploy_key_title, "replacement");
     }
 
     #[tokio::test]
