@@ -205,3 +205,75 @@ pub async fn bind_deploy_key(repo_id: i64, ssh_key_id: i64, writable: bool) -> R
     )
     .await
 }
+
+/// A persisted clone task, including terminal-style output.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CloneTask {
+    pub id: u64,
+    pub repo_id: i64,
+    pub repo_full_name: String,
+    pub repo_name: String,
+    pub local_path: String,
+    pub command: String,
+    pub status: String,
+    pub log: String,
+    pub started_at: i64,
+    pub finished_at: Option<i64>,
+    pub exit_code: Option<i32>,
+    pub error: Option<String>,
+}
+
+/// Clone a repository into a native-directory selected by the user.
+///
+/// Returns `None` when the user cancels the directory picker.
+pub async fn clone_repository(repo_id: i64, title: String) -> Result<Option<CloneTask>, String> {
+    #[derive(Serialize)]
+    #[serde(rename_all = "camelCase")]
+    struct Args {
+        repo_id: i64,
+        title: String,
+    }
+    invoke("clone_repository", &Args { repo_id, title }).await
+}
+
+/// Return persisted clone tasks, newest first.
+pub async fn list_clone_tasks() -> Result<Vec<CloneTask>, String> {
+    invoke_no_args("list_clone_tasks").await
+}
+
+/// Clear completed clone tasks. In-flight tasks remain visible.
+pub async fn clear_clone_tasks() -> Result<Vec<CloneTask>, String> {
+    invoke_no_args("clear_clone_tasks").await
+}
+
+/// Result returned after connecting or testing a local clone's remote.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RepoRemoteResult {
+    pub repo_id: i64,
+    pub repo_full_name: String,
+    pub local_path: String,
+    pub remote_url: String,
+    pub output: String,
+}
+
+/// Set the latest successful local clone's `origin` to the deploy-key remote.
+pub async fn connect_repository_remote(repo_id: i64) -> Result<RepoRemoteResult, String> {
+    #[derive(Serialize)]
+    #[serde(rename_all = "camelCase")]
+    struct Args {
+        repo_id: i64,
+    }
+    invoke("connect_repository_remote", &Args { repo_id }).await
+}
+
+/// Test whether the latest successful local clone can reach `origin`.
+pub async fn test_repository_remote(repo_id: i64) -> Result<RepoRemoteResult, String> {
+    #[derive(Serialize)]
+    #[serde(rename_all = "camelCase")]
+    struct Args {
+        repo_id: i64,
+    }
+    invoke("test_repository_remote", &Args { repo_id }).await
+}

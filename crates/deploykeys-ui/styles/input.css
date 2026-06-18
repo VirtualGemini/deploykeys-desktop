@@ -93,9 +93,41 @@
     box-shadow: 0 0 10px color-mix(in oklab, var(--color-primary) 45%, transparent);
   }
 
+  .clone-activity-scan::after {
+    content: "";
+    position: absolute;
+    inset: 1px;
+    z-index: 0;
+    transform: translateX(-120%);
+    border-radius: inherit;
+    background: linear-gradient(
+      90deg,
+      transparent 0%,
+      color-mix(in oklab, var(--color-primary) 48%, transparent) 48%,
+      transparent 100%
+    );
+    animation: clone-scan 1.15s linear infinite;
+    pointer-events: none;
+  }
+
+  .clone-activity-scan > * {
+    position: relative;
+    z-index: 1;
+  }
+
+  @keyframes clone-scan {
+    to {
+      transform: translateX(120%);
+    }
+  }
+
   @media (prefers-reduced-motion: reduce) {
     .header-progress-bar {
       transition: none;
+    }
+    .clone-activity-scan::after {
+      animation: none;
+      transform: translateX(0);
     }
   }
 

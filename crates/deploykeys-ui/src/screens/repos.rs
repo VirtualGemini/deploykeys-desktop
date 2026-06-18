@@ -13,6 +13,7 @@ use crate::page_size::page_size;
 use crate::progress::ProgressHandle;
 use crate::screens::keys::FormSelectDropdown;
 use leptos::*;
+use std::time::Duration;
 use wasm_bindgen::JsCast;
 use wasm_bindgen_futures::spawn_local;
 /// Sentinel value for the "no language" bucket in the language filter.
@@ -25,6 +26,19 @@ struct TableDragState {
     start_y: i32,
     scroll_left: i32,
     scroll_top: i32,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum RepoRemoteAction {
+    Connect,
+    Test,
+}
+
+#[derive(Clone, Copy)]
+struct MoreMenuState {
+    repo_id: i64,
+    top: f64,
+    left: f64,
 }
 
 #[component]
@@ -40,6 +54,13 @@ pub fn Repos(
     let loading = RwSignal::new(false);
     let syncing = RwSignal::new(false);
     let error = RwSignal::new(None::<String>);
+    let notice = RwSignal::new(None::<String>);
+    let clone_picker_running = RwSignal::new(None::<i64>);
+    let clone_tasks = RwSignal::new(Vec::<api::CloneTask>::new());
+    let clone_list_open = RwSignal::new(false);
+    let clone_log_task_id = RwSignal::new(None::<u64>);
+    let more_repo_open = RwSignal::new(None::<MoreMenuState>);
+    let remote_action_running = RwSignal::new(None::<(i64, RepoRemoteAction)>);
     let bind_repo = RwSignal::new(None::<Repo>);
     let bind_keys = RwSignal::new(Vec::<SshKey>::new());
     let bind_keys_loading = RwSignal::new(false);
@@ -103,6 +124,7 @@ pub fn Repos(
         syncing.set(true);
         let sim = progress.begin_simulated();
         error.set(None);
+        notice.set(None);
         spawn_local(async move {
             if let Err(e) = api::sync_repositories().await {
                 error.set(Some(e));
@@ -114,6 +136,56 @@ pub fn Repos(
             progress.end_simulated(&sim);
         });
     };
+
+    spawn_local(async move {
+        match api::list_clone_tasks().await {
+            Ok(tasks) => clone_tasks.set(tasks),
+            Err(e) => leptos::logging::warn!("Failed to load clone tasks: {e}"),
+        }
+    });
+    if let Ok(interval) = set_interval_with_handle(
+        move || {
+            spawn_local(async move {
+                match api::list_clone_tasks().await {
+                    Ok(tasks) => clone_tasks.set(tasks),
+                    Err(e) => leptos::logging::warn!("Failed to refresh clone tasks: {e}"),
+                }
+            });
+        },
+        Duration::from_millis(700),
+    ) {
+        on_cleanup(move || interval.clear());
+    }
+
+    let clone_repo = move |repo: Repo| {
+        if clone_picker_running.get_untracked().is_some() {
+            return;
+        }
+        clone_picker_running.set(Some(repo.id));
+        error.set(None);
+        notice.set(None);
+        let dialog_title = t("repos.clone_dialog_title").replace("{}", &repo.full_name);
+        spawn_local(async move {
+            match api::clone_repository(repo.id, dialog_title).await {
+                Ok(Some(task)) => {
+                    let task_id = task.id;
+                    upsert_clone_task(clone_tasks, task);
+                    clone_log_task_id.set(Some(task_id));
+                    clone_list_open.set(false);
+                }
+                Ok(None) => {}
+                Err(e) => error.set(Some(e)),
+            }
+            clone_picker_running.set(None);
+        });
+    };
+    let running_clone_count = Signal::derive(move || {
+        clone_tasks
+            .get()
+            .iter()
+            .filter(|task| task.status == "running")
+            .count()
+    });
 
     // Options for the language filter: each distinct language, plus "Other" when
     // some repo has no language.
@@ -221,11 +293,13 @@ pub fn Repos(
         }
     };
     let open_bind_dialog = move |repo: Repo| {
+        more_repo_open.set(None);
         bind_repo.set(Some(repo));
         bind_keys.set(Vec::new());
         bind_selected_key.set(None);
         bind_writable.set(false);
         bind_error.set(None);
+        notice.set(None);
         bind_keys_loading.set(true);
         let sim = progress.begin_simulated();
         spawn_local(async move {
@@ -254,6 +328,7 @@ pub fn Repos(
 
         bind_submitting.set(true);
         bind_error.set(None);
+        notice.set(None);
         let writable = bind_writable.get_untracked();
         let sim = progress.begin_simulated();
         spawn_local(async move {
@@ -265,20 +340,81 @@ pub fn Repos(
             progress.end_simulated(&sim);
         });
     };
+    let connect_repo = move |repo_id: i64| {
+        if remote_action_running.get_untracked().is_some() {
+            return;
+        }
+        more_repo_open.set(None);
+        remote_action_running.set(Some((repo_id, RepoRemoteAction::Connect)));
+        error.set(None);
+        notice.set(None);
+        let success = t("repos.connect_success").to_string();
+        let sim = progress.begin_simulated();
+        spawn_local(async move {
+            match api::connect_repository_remote(repo_id).await {
+                Ok(_) => notice.set(Some(success)),
+                Err(e) => error.set(Some(e)),
+            }
+            remote_action_running.set(None);
+            progress.end_simulated(&sim);
+        });
+    };
+    let test_repo = move |repo_id: i64| {
+        if remote_action_running.get_untracked().is_some() {
+            return;
+        }
+        more_repo_open.set(None);
+        remote_action_running.set(Some((repo_id, RepoRemoteAction::Test)));
+        error.set(None);
+        notice.set(None);
+        let success = t("repos.test_success").to_string();
+        let sim = progress.begin_simulated();
+        spawn_local(async move {
+            match api::test_repository_remote(repo_id).await {
+                Ok(_) => notice.set(Some(success)),
+                Err(e) => error.set(Some(e)),
+            }
+            remote_action_running.set(None);
+            progress.end_simulated(&sim);
+        });
+    };
 
     view! {
         <div class="flex flex-col gap-5 h-full">
             <div class="flex items-center justify-between gap-3">
                 <h1 class="text-2xl font-semibold text-content">{move || t("nav.repos")}</h1>
-                // Always visible: when signed out, clicking it spotlights sign-in.
-                <button
-                    type="button"
-                    class="shrink-0 py-2 px-4 text-sm font-medium rounded-lg border border-border bg-primary-soft text-primary hover:opacity-80 focus:outline-none transition-opacity disabled:opacity-50"
-                    prop:disabled=move || syncing.get()
-                    on:click=move |_| sync()
-                >
-                    {move || t("repos.sync")}
-                </button>
+                <div class="flex shrink-0 items-center gap-2">
+                    <button
+                        type="button"
+                        title=move || t("repos.clone_tasks")
+                        aria-label=move || t("repos.clone_tasks")
+                        class=move || {
+                            let base = "relative inline-flex size-9 items-center justify-center overflow-visible rounded-lg border border-border bg-surface text-content hover:bg-bg hover:text-primary focus:outline-none";
+                            if running_clone_count.get() > 0 {
+                                format!("{base} clone-activity-scan")
+                            } else {
+                                base.to_string()
+                            }
+                        }
+                        on:click=move |_| clone_list_open.set(true)
+                    >
+                        <Icon name=IconName::Download class="size-4" />
+                        <Show when=move || { running_clone_count.get() > 0 }>
+                            <span class="pointer-events-none absolute -left-1.5 -top-1.5 z-20 min-w-4 rounded-full bg-primary px-1 text-center text-[10px] font-semibold leading-4 text-on-primary shadow-sm">
+                                {move || running_clone_count.get().min(99).to_string()}
+                            </span>
+                        </Show>
+                    </button>
+                    // Always visible: when signed out, clicking it spotlights sign-in.
+                    <button
+                        type="button"
+                        class="py-2 px-4 text-sm font-medium rounded-lg border border-border bg-primary-soft text-primary hover:opacity-80 focus:outline-none transition-opacity disabled:opacity-50"
+                        prop:disabled=move || syncing.get()
+                        on:click=move |_| sync()
+                    >
+                        {move || t("repos.sync")}
+                    </button>
+                </div>
             </div>
 
             <Show
@@ -315,6 +451,11 @@ pub fn Repos(
                 <Show when=move || error.get().is_some()>
                     <div class="w-full p-3 text-sm rounded-lg border border-red-200 bg-red-50 text-red-700 dark:border-red-900 dark:bg-red-950 dark:text-red-300">
                         {move || error.get().unwrap_or_default()}
+                    </div>
+                </Show>
+                <Show when=move || notice.get().is_some()>
+                    <div class="w-full p-3 text-sm rounded-lg border border-green-200 bg-green-50 text-green-700 dark:border-green-900 dark:bg-green-950 dark:text-green-300">
+                        {move || notice.get().unwrap_or_default()}
                     </div>
                 </Show>
 
@@ -410,6 +551,8 @@ pub fn Repos(
                                                         each=move || paged.get()
                                                         key=|r| r.full_name.clone()
                                                         children=move |r| {
+                                                            let repo_id = r.id;
+                                                            let repo_for_clone = r.clone();
                                                             let repo_for_bind = r.clone();
                                                             let Repo {
                                                                 full_name,
@@ -455,7 +598,18 @@ pub fn Repos(
                                                                                 type="button"
                                                                                 title=move || t("repos.clone_repository")
                                                                                 aria-label=move || t("repos.clone_repository")
-                                                                                class="inline-flex items-center justify-center size-8 rounded-md text-primary hover:bg-primary-soft focus:outline-none"
+                                                                                class=move || {
+                                                                                    let base = "relative inline-flex items-center justify-center size-8 overflow-hidden rounded-md text-primary hover:bg-primary-soft focus:outline-none disabled:pointer-events-none";
+                                                                                    if clone_picker_running.get() == Some(repo_id) {
+                                                                                        format!("{base} clone-activity-scan")
+                                                                                    } else if clone_picker_running.get().is_some() {
+                                                                                        format!("{base} opacity-50")
+                                                                                    } else {
+                                                                                        base.to_string()
+                                                                                    }
+                                                                                }
+                                                                                prop:disabled=move || clone_picker_running.get().is_some()
+                                                                                on:click=move |_| clone_repo(repo_for_clone.clone())
                                                                             >
                                                                                 <Icon name=IconName::Download class="size-4" />
                                                                             </button>
@@ -470,9 +624,21 @@ pub fn Repos(
                                                                             </button>
                                                                             <button
                                                                                 type="button"
+                                                                                data-more-actions-button=""
                                                                                 title=move || t("repos.more_actions")
                                                                                 aria-label=move || t("repos.more_actions")
                                                                                 class="inline-flex items-center justify-center size-8 rounded-md text-content hover:bg-primary-soft dark:hover:bg-primary-soft/60 focus:outline-none"
+                                                                                on:click=move |ev| {
+                                                                                    ev.stop_propagation();
+                                                                                    let (top, left) = more_menu_position(&ev);
+                                                                                    more_repo_open.update(|open| {
+                                                                                        *open = if open.as_ref().map(|menu| menu.repo_id) == Some(repo_id) {
+                                                                                            None
+                                                                                        } else {
+                                                                                            Some(MoreMenuState { repo_id, top, left })
+                                                                                        };
+                                                                                    });
+                                                                                }
                                                                             >
                                                                                 <Icon name=IconName::MoreVertical class="size-4" />
                                                                             </button>
@@ -508,7 +674,378 @@ pub fn Repos(
                 writable=bind_writable
                 on_submit=Callback::new(move |_| submit_bind_key())
             />
+            <CloneTasksDialog
+                open=clone_list_open
+                tasks=clone_tasks
+                selected_task_id=clone_log_task_id
+                on_clear=Callback::new(move |_| {
+                    spawn_local(async move {
+                        match api::clear_clone_tasks().await {
+                            Ok(tasks) => clone_tasks.set(tasks),
+                            Err(e) => error.set(Some(e)),
+                        }
+                    });
+                })
+            />
+            <CloneLogDialog
+                task_id=clone_log_task_id
+                tasks=clone_tasks
+            />
+            <RepoMoreActionsDropdown
+                menu=more_repo_open
+                running=remote_action_running
+                on_connect=Callback::new(move |repo_id| connect_repo(repo_id))
+                on_test=Callback::new(move |repo_id| test_repo(repo_id))
+            />
         </div>
+    }
+}
+
+fn more_menu_position(ev: &web_sys::MouseEvent) -> (f64, f64) {
+    const MENU_WIDTH: f64 = 96.0;
+    const MENU_HEIGHT: f64 = 84.0;
+    const GAP: f64 = 6.0;
+    const MARGIN: f64 = 8.0;
+
+    let Some(element) = ev
+        .target()
+        .and_then(|target| target.dyn_into::<web_sys::Element>().ok())
+        .and_then(|target| {
+            target
+                .closest("[data-more-actions-button]")
+                .ok()
+                .flatten()
+                .or_else(|| target.closest("button").ok().flatten())
+                .or(Some(target))
+        })
+    else {
+        return (MARGIN, MARGIN);
+    };
+    let rect = element.get_bounding_client_rect();
+    let window = web_sys::window();
+    let viewport_width = window
+        .as_ref()
+        .and_then(|window| window.inner_width().ok())
+        .and_then(|value| value.as_f64())
+        .unwrap_or(1024.0);
+    let viewport_height = window
+        .and_then(|window| window.inner_height().ok())
+        .and_then(|value| value.as_f64())
+        .unwrap_or(768.0);
+
+    let max_left = (viewport_width - MENU_WIDTH - MARGIN).max(MARGIN);
+    let left = (rect.right() - MENU_WIDTH).clamp(MARGIN, max_left);
+    let preferred_top = rect.bottom() + GAP;
+    let top = if preferred_top + MENU_HEIGHT > viewport_height - MARGIN {
+        (rect.top() - MENU_HEIGHT - GAP).max(MARGIN)
+    } else {
+        preferred_top
+    };
+
+    (top, left)
+}
+
+#[component]
+fn RepoMoreActionsDropdown(
+    menu: RwSignal<Option<MoreMenuState>>,
+    running: RwSignal<Option<(i64, RepoRemoteAction)>>,
+    on_connect: Callback<i64>,
+    on_test: Callback<i64>,
+) -> impl IntoView {
+    view! {
+        <Show when=move || menu.get().is_some()>
+            <div
+                class="fixed inset-0 z-40 cursor-default"
+                on:click=move |_| menu.set(None)
+            ></div>
+            <div
+                data-no-drag-scroll
+                class="fixed z-50 min-w-24 rounded-lg border border-border bg-surface py-1 shadow-xl"
+                style=move || {
+                    menu.get()
+                        .map(|menu| format!("top: {:.1}px; left: {:.1}px;", menu.top, menu.left))
+                        .unwrap_or_default()
+                }
+            >
+                <button
+                    type="button"
+                    class="block w-full px-3 py-1.5 text-left text-sm font-medium text-content hover:bg-bg hover:text-primary focus:outline-none disabled:opacity-50"
+                    prop:disabled=move || running.get().is_some()
+                    on:click=move |_| {
+                        if let Some(menu) = menu.get_untracked() {
+                            on_connect.call(menu.repo_id);
+                        }
+                    }
+                >
+                    {move || t("repos.connect_remote")}
+                </button>
+                <button
+                    type="button"
+                    class="block w-full px-3 py-1.5 text-left text-sm font-medium text-content hover:bg-bg hover:text-primary focus:outline-none disabled:opacity-50"
+                    prop:disabled=move || running.get().is_some()
+                    on:click=move |_| {
+                        if let Some(menu) = menu.get_untracked() {
+                            on_test.call(menu.repo_id);
+                        }
+                    }
+                >
+                    {move || t("repos.test_remote")}
+                </button>
+            </div>
+        </Show>
+    }
+}
+
+fn upsert_clone_task(tasks: RwSignal<Vec<api::CloneTask>>, next: api::CloneTask) {
+    tasks.update(|tasks| {
+        if let Some(task) = tasks.iter_mut().find(|task| task.id == next.id) {
+            *task = next;
+        } else {
+            tasks.insert(0, next);
+        }
+    });
+}
+
+fn clone_status_label(status: &str) -> String {
+    match status {
+        "running" => t("repos.clone_status_running").to_string(),
+        "succeeded" => t("repos.clone_status_succeeded").to_string(),
+        "failed" => t("repos.clone_status_failed").to_string(),
+        _ => status.to_string(),
+    }
+}
+
+fn clone_status_class(status: &str) -> String {
+    let base = "shrink-0 rounded-full border border-border px-2 py-0.5 text-[11px] font-medium";
+    match status {
+        "running" | "succeeded" => format!("{base} text-primary"),
+        "failed" => format!("{base} text-red-600 dark:text-red-400"),
+        _ => format!("{base} text-muted"),
+    }
+}
+
+fn compact_clone_log(log: &str) -> String {
+    log.replace("\r\n", "\n")
+        .replace('\r', "\n")
+        .lines()
+        .filter_map(compact_clone_log_line)
+        .map(|line| format!("{line}\n"))
+        .collect()
+}
+
+fn compact_clone_log_line(line: &str) -> Option<String> {
+    let line = line.trim();
+    if line.is_empty() {
+        return None;
+    }
+
+    let keep = line.starts_with("Cloning into ")
+        || line.starts_with("remote: Enumerating objects:")
+        || line.starts_with("remote: Total ")
+        || (line.starts_with("remote: Counting objects:") && line.contains("done."))
+        || (line.starts_with("remote: Compressing objects:") && line.contains("done."))
+        || (line.starts_with("Receiving objects:") && line.contains("done."))
+        || (line.starts_with("Resolving deltas:") && line.contains("done."))
+        || line.starts_with("fatal:")
+        || line.starts_with("error:")
+        || line.starts_with("ssh:")
+        || line.contains("Permission denied")
+        || line.contains("Host key verification failed")
+        || line.contains("Repository not found");
+
+    keep.then(|| line.to_string())
+}
+
+#[component]
+fn CloneTasksDialog(
+    open: RwSignal<bool>,
+    tasks: RwSignal<Vec<api::CloneTask>>,
+    selected_task_id: RwSignal<Option<u64>>,
+    on_clear: Callback<()>,
+) -> impl IntoView {
+    let has_clearable = Signal::derive(move || {
+        tasks
+            .get()
+            .iter()
+            .any(|task| task.status.as_str() != "running")
+    });
+
+    view! {
+        <div
+            class=move || {
+                if open.get() {
+                    "fixed inset-0 z-[100] bg-black/50 backdrop-blur-sm flex items-center justify-center px-4 opacity-100 transition-opacity duration-300"
+                } else {
+                    "fixed inset-0 z-[100] bg-black/50 backdrop-blur-sm flex items-center justify-center px-4 opacity-0 pointer-events-none transition-opacity duration-300"
+                }
+            }
+            on:click=move |_| open.set(false)
+        >
+            <div
+                class=move || {
+                    if open.get() {
+                        "w-full max-w-md max-h-[min(24rem,calc(100vh-6rem))] bg-surface border border-border rounded-xl shadow-2xl overflow-hidden scale-100 transition-transform duration-300 flex flex-col"
+                    } else {
+                        "w-full max-w-md max-h-[min(24rem,calc(100vh-6rem))] bg-surface border border-border rounded-xl shadow-2xl overflow-hidden scale-95 transition-transform duration-300 flex flex-col"
+                    }
+                }
+                on:click=|ev| ev.stop_propagation()
+            >
+                <div class="flex items-start justify-between gap-4 px-4 py-3 border-b border-border">
+                    <div class="min-w-0">
+                        <h2 class="text-base font-semibold text-content">{move || t("repos.clone_tasks_title")}</h2>
+                        <p class="mt-1 text-sm text-muted">{move || t("repos.clone_tasks_subtitle")}</p>
+                    </div>
+                    <button
+                        type="button"
+                        title=move || t("common.cancel")
+                        aria-label=move || t("common.cancel")
+                        class="inline-flex items-center justify-center size-8 rounded-md text-muted hover:bg-bg hover:text-content focus:outline-none"
+                        on:click=move |_| open.set(false)
+                    >
+                        <Icon name=IconName::Close class="size-4" />
+                    </button>
+                </div>
+
+                <div class="min-h-0 flex-1 overflow-y-auto px-3 py-3">
+                    <Show
+                        when=move || !tasks.get().is_empty()
+                        fallback=move || view! {
+                            <div class="px-3 py-10 text-center text-sm text-muted">
+                                {move || t("repos.clone_tasks_empty")}
+                            </div>
+                        }
+                    >
+                        <div class="space-y-1">
+                            <For
+                                each=move || tasks.get()
+                                key=|task| task.id
+                                children=move |task| {
+                                    let id = task.id;
+                                    view! {
+                                        <button
+                                            type="button"
+                                            class="group w-full rounded-lg px-3 py-2 text-left hover:bg-bg focus:outline-none focus:bg-bg"
+                                            on:click=move |_| {
+                                                selected_task_id.set(Some(id));
+                                                open.set(false);
+                                            }
+                                        >
+                                            <div class="flex items-center justify-between gap-3">
+                                                <div class="min-w-0">
+                                                    <div class="truncate text-sm font-medium text-content">{task.repo_full_name.clone()}</div>
+                                                    <div class="mt-1 truncate text-xs text-muted">{task.local_path.clone()}</div>
+                                                </div>
+                                                <span class=clone_status_class(&task.status)>
+                                                    {move || clone_status_label(&task.status)}
+                                                </span>
+                                            </div>
+                                        </button>
+                                    }
+                                }
+                            />
+                        </div>
+                    </Show>
+                </div>
+
+                <div class="flex items-center justify-between gap-3 border-t border-border px-4 py-3">
+                    <button
+                        type="button"
+                        class="px-3 py-2 text-sm font-medium rounded-lg text-muted hover:bg-bg hover:text-content focus:outline-none disabled:opacity-50"
+                        prop:disabled=move || !has_clearable.get()
+                        on:click=move |_| on_clear.call(())
+                    >
+                        {move || t("repos.clone_clear")}
+                    </button>
+                    <button
+                        type="button"
+                        class="px-4 py-2 text-sm font-medium rounded-lg bg-primary text-on-primary hover:bg-primary-hover focus:outline-none"
+                        on:click=move |_| open.set(false)
+                    >
+                        {move || t("common.cancel")}
+                    </button>
+                </div>
+            </div>
+        </div>
+    }
+}
+
+#[component]
+fn CloneLogDialog(
+    task_id: RwSignal<Option<u64>>,
+    tasks: RwSignal<Vec<api::CloneTask>>,
+) -> impl IntoView {
+    let terminal_ref = NodeRef::<html::Div>::new();
+    let selected_task = Signal::derive(move || {
+        let id = task_id.get()?;
+        tasks.get().into_iter().find(|task| task.id == id)
+    });
+
+    create_effect(move |_| {
+        let log_len = selected_task.get().map(|task| task.log.len()).unwrap_or(0);
+        if log_len == 0 {
+            return;
+        }
+        set_timeout(
+            move || {
+                if let Some(node) = terminal_ref.get() {
+                    node.set_scroll_top(node.scroll_height());
+                }
+            },
+            Duration::from_millis(20),
+        );
+    });
+
+    view! {
+        <Show when=move || selected_task.get().is_some()>
+            <div
+                class="fixed inset-0 z-[110] bg-black/55 backdrop-blur-sm flex items-center justify-center px-4 opacity-100 transition-opacity duration-300"
+                on:click=move |_| task_id.set(None)
+            >
+                <div
+                    class="w-full max-w-xl h-[min(22rem,calc(100vh-6rem))] overflow-hidden rounded-lg border border-zinc-800 bg-zinc-950 shadow-2xl flex flex-col"
+                    on:click=|ev| ev.stop_propagation()
+                >
+                    <div class="flex items-center justify-between gap-4 border-b border-zinc-800 px-3 py-2">
+                        <div class="min-w-0">
+                            <h2 class="truncate text-sm font-semibold text-zinc-100">{move || {
+                                selected_task
+                                    .get()
+                                    .map(|task| task.repo_full_name)
+                                    .unwrap_or_else(|| t("repos.clone_log_title").to_string())
+                            }}</h2>
+                            <p class="mt-1 truncate text-xs text-zinc-500">{move || {
+                                selected_task
+                                    .get()
+                                    .map(|task| task.local_path)
+                                    .unwrap_or_default()
+                            }}</p>
+                        </div>
+                        <button
+                            type="button"
+                            title=move || t("common.cancel")
+                            aria-label=move || t("common.cancel")
+                            class="inline-flex items-center justify-center size-8 rounded-md text-zinc-400 hover:bg-zinc-900 hover:text-zinc-100 focus:outline-none"
+                            on:click=move |_| task_id.set(None)
+                        >
+                            <Icon name=IconName::Close class="size-4" />
+                        </button>
+                    </div>
+                    <div
+                        node_ref=terminal_ref
+                        class="min-h-0 flex-1 overflow-y-auto bg-zinc-950 px-3 py-2"
+                    >
+                        <pre class="m-0 whitespace-pre-wrap break-words font-mono text-[12px] leading-5 text-blue-100">{move || {
+                            selected_task
+                                .get()
+                                .map(|task| compact_clone_log(&task.log))
+                                .filter(|log| !log.is_empty())
+                                .unwrap_or_else(|| t("repos.clone_no_log").to_string())
+                        }}</pre>
+                    </div>
+                </div>
+            </div>
+        </Show>
     }
 }
 

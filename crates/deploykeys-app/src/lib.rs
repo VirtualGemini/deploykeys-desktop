@@ -7,11 +7,23 @@
 
 use deploykeys_core::credentials::CredentialStore;
 use deploykeys_core::db::Database;
-use deploykeys_core::models::{Account, DeployKeyPermission, KeyAlgorithm};
+use deploykeys_core::models::{
+    Account, DeployKeyPermission, KeyAlgorithm, KeyBinding, KeyBindingStatus, Repository,
+};
 use deploykeys_core::progress::{OperationId, ProgressReporter};
 use deploykeys_core::services::{AuthService, KeyBindingService, RepoSyncService, SshKeyService};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
+use std::path::PathBuf;
+use std::process::Stdio;
+use std::sync::{
+    atomic::{AtomicU64, Ordering},
+    Arc, Mutex,
+};
+use std::time::{SystemTime, UNIX_EPOCH};
 use tauri::{AppHandle, Emitter, Manager, State};
+use tauri_plugin_dialog::DialogExt;
+use tokio::io::{AsyncRead, AsyncReadExt};
 
 const PROGRESS_EVENT: &str = "progress";
 
@@ -19,6 +31,11 @@ const PROGRESS_EVENT: &str = "progress";
 const LANGUAGE_SETTING_KEY: &str = "language";
 /// `app_settings` key under which the repository-list page size is stored.
 const PAGE_SIZE_SETTING_KEY: &str = "repos_page_size";
+/// `app_settings` key under which clone task history is stored as JSON.
+const CLONE_TASKS_SETTING_KEY: &str = "clone_tasks";
+/// `app_settings` key under which each repository's latest successful clone
+/// path is stored as JSON.
+const REPO_CLONE_PATHS_SETTING_KEY: &str = "repo_clone_paths";
 
 /// Shared native state, managed by Tauri and injected into every command.
 struct AppState {
@@ -27,14 +44,19 @@ struct AppState {
     /// operations (e.g. repo sync) don't re-read the OS keyring — each keyring
     /// read can trigger a macOS keychain trust prompt. Populated on sign-in and
     /// lazily on first read; cleared on sign-out.
-    token: std::sync::Mutex<Option<String>>,
+    token: Mutex<Option<String>>,
+    clone_tasks: Arc<Mutex<Vec<CloneTaskDto>>>,
+    next_clone_task_id: AtomicU64,
 }
 
 impl AppState {
-    fn new(db: Database) -> Self {
+    fn new(db: Database, clone_tasks: Vec<CloneTaskDto>) -> Self {
+        let next_clone_task_id = clone_tasks.iter().map(|task| task.id).max().unwrap_or(0) + 1;
         Self {
             db,
-            token: std::sync::Mutex::new(None),
+            token: Mutex::new(None),
+            clone_tasks: Arc::new(Mutex::new(clone_tasks)),
+            next_clone_task_id: AtomicU64::new(next_clone_task_id),
         }
     }
 
@@ -83,6 +105,56 @@ struct RepoDto {
 #[derive(Serialize)]
 struct SyncSummaryDto {
     repositories: usize,
+}
+
+#[derive(Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+enum CloneTaskStatus {
+    Running,
+    Succeeded,
+    Failed,
+}
+
+/// A persisted clone task, including its terminal-style output.
+#[derive(Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct CloneTaskDto {
+    id: u64,
+    repo_id: i64,
+    repo_full_name: String,
+    repo_name: String,
+    local_path: String,
+    command: String,
+    status: CloneTaskStatus,
+    log: String,
+    started_at: i64,
+    finished_at: Option<i64>,
+    exit_code: Option<i32>,
+    error: Option<String>,
+}
+
+impl CloneTaskDto {
+    fn is_running(&self) -> bool {
+        self.status == CloneTaskStatus::Running
+    }
+}
+
+#[derive(Clone)]
+struct PreparedClone {
+    task_id: u64,
+    clone_url: String,
+    parent_path: PathBuf,
+    local_path: PathBuf,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct RepoRemoteResultDto {
+    repo_id: i64,
+    repo_full_name: String,
+    local_path: String,
+    remote_url: String,
+    output: String,
 }
 
 /// An SSH key sent to the webview for the Keys list.
@@ -392,6 +464,155 @@ async fn bind_deploy_key(
     Ok(())
 }
 
+/// Let the user pick a parent directory, then clone the repository into
+/// `<selected directory>/<repository name>`.
+#[tauri::command]
+async fn clone_repository(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    repo_id: i64,
+    title: String,
+) -> Result<Option<CloneTaskDto>, String> {
+    let repo = state
+        .db
+        .repositories()
+        .find_by_id(repo_id)
+        .await
+        .map_err(|e| e.to_string())?
+        .ok_or("Repository not found")?;
+    validate_repo_name(&repo.name)?;
+
+    let mut dialog = app.dialog().file().set_title(title);
+    if let Some(home_dir) = dirs::home_dir() {
+        dialog = dialog.set_directory(home_dir);
+    }
+
+    let Some(parent) = dialog.blocking_pick_folder() else {
+        return Ok(None);
+    };
+    let parent = parent.into_path().map_err(|e| e.to_string())?;
+    if !parent.is_dir() {
+        return Err(format!(
+            "Selected path is not a directory: {}",
+            parent.display()
+        ));
+    }
+
+    let prepared = prepare_clone_task(&state, &repo, parent).await?;
+    let task = new_clone_task(&repo, &prepared);
+    push_clone_task(&state.clone_tasks, task.clone());
+    persist_clone_tasks(&state.db, &state.clone_tasks).await?;
+
+    let db = state.db.clone();
+    let clone_tasks = state.clone_tasks.clone();
+    tokio::spawn(async move {
+        run_git_clone_task(db, clone_tasks, prepared).await;
+    });
+
+    Ok(Some(task))
+}
+
+/// Return persisted clone tasks, newest first.
+#[tauri::command]
+async fn list_clone_tasks(state: State<'_, AppState>) -> Result<Vec<CloneTaskDto>, String> {
+    Ok(snapshot_clone_tasks(&state.clone_tasks))
+}
+
+/// Clear completed clone tasks while keeping any in-flight clone visible.
+#[tauri::command]
+async fn clear_clone_tasks(state: State<'_, AppState>) -> Result<Vec<CloneTaskDto>, String> {
+    let snapshot = {
+        let mut tasks = state.clone_tasks.lock().expect("clone task lock");
+        tasks.retain(CloneTaskDto::is_running);
+        tasks.clone()
+    };
+    persist_clone_task_snapshot(&state.db, &snapshot).await?;
+    Ok(snapshot)
+}
+
+/// Point the latest successful local clone's `origin` at the deploy-key SSH
+/// alias for this repository.
+#[tauri::command]
+async fn connect_repository_remote(
+    state: State<'_, AppState>,
+    repo_id: i64,
+) -> Result<RepoRemoteResultDto, String> {
+    let repo = find_repository(&state, repo_id).await?;
+    active_local_binding(&state, &repo).await?;
+    let local_path = latest_successful_clone_path(&state, repo_id).await?;
+    let remote_url = deploy_key_remote_url(&repo);
+
+    let args = vec![
+        "-C".to_string(),
+        path_arg(&local_path),
+        "remote".to_string(),
+        "set-url".to_string(),
+        "origin".to_string(),
+        remote_url.clone(),
+    ];
+    run_git_checked(&args, None).await?;
+
+    Ok(remote_result(
+        &repo,
+        &local_path,
+        &remote_url,
+        String::new(),
+    ))
+}
+
+/// Test that the latest successful local clone can reach `origin`.
+#[tauri::command]
+async fn test_repository_remote(
+    state: State<'_, AppState>,
+    repo_id: i64,
+) -> Result<RepoRemoteResultDto, String> {
+    let repo = find_repository(&state, repo_id).await?;
+    let binding = active_local_binding(&state, &repo).await?;
+    let local_path = latest_successful_clone_path(&state, repo_id).await?;
+    let remote_url = deploy_key_remote_url(&repo);
+
+    ensure_git_remote_matches(&local_path, &remote_url).await?;
+
+    let ssh_command = format!(
+        "ssh -i {} -o IdentitiesOnly=yes",
+        shell_quote(&binding.private_key_path)
+    );
+    let args = vec![
+        "-C".to_string(),
+        path_arg(&local_path),
+        "ls-remote".to_string(),
+        "origin".to_string(),
+    ];
+    let output = run_git_checked(&args, Some(("GIT_SSH_COMMAND", ssh_command.as_str()))).await?;
+
+    Ok(remote_result(&repo, &local_path, &remote_url, output))
+}
+
+async fn prepare_clone_task(
+    state: &AppState,
+    repo: &Repository,
+    parent_path: PathBuf,
+) -> Result<PreparedClone, String> {
+    let local_path = parent_path.join(&repo.name);
+    if tokio::fs::try_exists(&local_path)
+        .await
+        .map_err(|e| e.to_string())?
+    {
+        return Err(format!(
+            "Target directory already exists: {}",
+            local_path.display()
+        ));
+    }
+
+    let clone_url = clone_url_for_repo(state, repo).await?;
+    Ok(PreparedClone {
+        task_id: state.next_clone_task_id.fetch_add(1, Ordering::Relaxed),
+        clone_url,
+        parent_path,
+        local_path,
+    })
+}
+
 fn ssh_key_dto(key: deploykeys_core::models::SshKey) -> SshKeyDto {
     SshKeyDto {
         id: key.id,
@@ -427,6 +648,621 @@ async fn resolve_token(state: &AppState, account: &Account) -> Result<String, St
     Ok(token)
 }
 
+async fn clone_url_for_repo(state: &AppState, repo: &Repository) -> Result<String, String> {
+    let bindings = state
+        .db
+        .key_bindings()
+        .list_by_repo(repo.id)
+        .await
+        .map_err(|e| e.to_string())?;
+
+    for binding in bindings {
+        if binding.status != KeyBindingStatus::Active {
+            continue;
+        }
+        if tokio::fs::try_exists(&binding.private_key_path)
+            .await
+            .unwrap_or(false)
+        {
+            return Ok(format!(
+                "git@{}:{}/{}.git",
+                repo_ssh_host_alias(repo),
+                repo.owner,
+                repo.name
+            ));
+        }
+    }
+
+    Ok(repo.ssh_url.clone())
+}
+
+async fn find_repository(state: &AppState, repo_id: i64) -> Result<Repository, String> {
+    state
+        .db
+        .repositories()
+        .find_by_id(repo_id)
+        .await
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| "Repository not found".to_string())
+}
+
+async fn active_local_binding(state: &AppState, repo: &Repository) -> Result<KeyBinding, String> {
+    let bindings = state
+        .db
+        .key_bindings()
+        .list_by_repo(repo.id)
+        .await
+        .map_err(|e| e.to_string())?;
+
+    for binding in bindings {
+        if binding.status != KeyBindingStatus::Active {
+            continue;
+        }
+        if tokio::fs::try_exists(&binding.private_key_path)
+            .await
+            .unwrap_or(false)
+        {
+            return Ok(binding);
+        }
+    }
+
+    Err(format!(
+        "No active local deploy key is available for {}.",
+        repo.full_name
+    ))
+}
+
+async fn latest_successful_clone_path(state: &AppState, repo_id: i64) -> Result<PathBuf, String> {
+    if let Some(path) = latest_persisted_clone_path(&state.db, repo_id).await? {
+        if tokio::fs::try_exists(&path).await.unwrap_or(false) {
+            return Ok(path);
+        }
+    }
+
+    let tasks = snapshot_clone_tasks(&state.clone_tasks);
+    let mut latest_missing_path = None::<PathBuf>;
+
+    for task in tasks
+        .into_iter()
+        .filter(|task| task.repo_id == repo_id && task.status == CloneTaskStatus::Succeeded)
+    {
+        let path = PathBuf::from(&task.local_path);
+        if tokio::fs::try_exists(&path).await.unwrap_or(false) {
+            return Ok(path);
+        }
+        latest_missing_path.get_or_insert(path);
+    }
+
+    if let Some(path) = latest_missing_path {
+        return Err(format!(
+            "The latest successful clone path no longer exists: {}",
+            path.display()
+        ));
+    }
+
+    Err("Clone this repository successfully before connecting it.".to_string())
+}
+
+async fn latest_persisted_clone_path(
+    db: &Database,
+    repo_id: i64,
+) -> Result<Option<PathBuf>, String> {
+    let paths = load_repo_clone_paths(db).await?;
+    Ok(paths.get(&repo_id).map(PathBuf::from))
+}
+
+async fn persist_repo_clone_path(
+    db: &Database,
+    repo_id: i64,
+    local_path: &str,
+) -> Result<(), String> {
+    let mut paths = load_repo_clone_paths(db).await?;
+    paths.insert(repo_id, local_path.to_string());
+    let json = serde_json::to_string(&paths).map_err(|e| e.to_string())?;
+    db.set_setting(REPO_CLONE_PATHS_SETTING_KEY, &json)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+async fn load_repo_clone_paths(db: &Database) -> Result<HashMap<i64, String>, String> {
+    let Some(json) = db
+        .get_setting(REPO_CLONE_PATHS_SETTING_KEY)
+        .await
+        .map_err(|e| e.to_string())?
+    else {
+        return Ok(HashMap::new());
+    };
+
+    serde_json::from_str(&json).map_err(|e| e.to_string())
+}
+
+async fn ensure_git_remote_matches(local_path: &PathBuf, expected_url: &str) -> Result<(), String> {
+    let args = vec![
+        "-C".to_string(),
+        path_arg(local_path),
+        "remote".to_string(),
+        "get-url".to_string(),
+        "origin".to_string(),
+    ];
+    let current = run_git_checked(&args, None).await?;
+    let current = current.trim();
+    if current == expected_url {
+        return Ok(());
+    }
+
+    Err(format!(
+        "Remote origin is not connected. Click Connect first. Current origin: {}",
+        if current.is_empty() {
+            "(empty)"
+        } else {
+            current
+        }
+    ))
+}
+
+async fn run_git_checked(args: &[String], env: Option<(&str, &str)>) -> Result<String, String> {
+    let mut command = tokio::process::Command::new(git_program());
+    command
+        .args(args)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    if let Some((key, value)) = env {
+        command.env(key, value);
+    }
+
+    let output = command
+        .output()
+        .await
+        .map_err(|e| format!("Failed to start git: {e}"))?;
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    if output.status.success() {
+        return Ok(trim_git_output(&stdout, &stderr));
+    }
+
+    Err(format_git_failure(
+        args,
+        output.status.code(),
+        &stdout,
+        &stderr,
+    ))
+}
+
+fn trim_git_output(stdout: &str, stderr: &str) -> String {
+    let output = if stdout.trim().is_empty() {
+        stderr.trim()
+    } else {
+        stdout.trim()
+    };
+    truncate_message(output)
+}
+
+fn format_git_failure(
+    args: &[String],
+    exit_code: Option<i32>,
+    stdout: &str,
+    stderr: &str,
+) -> String {
+    let output = if stderr.trim().is_empty() {
+        stdout.trim()
+    } else {
+        stderr.trim()
+    };
+    let status = exit_code
+        .map(|code| code.to_string())
+        .unwrap_or_else(|| "unknown".to_string());
+    let detail = if output.is_empty() {
+        "No output".to_string()
+    } else {
+        truncate_message(output)
+    };
+    format!(
+        "git {} failed with status {status}: {detail}",
+        args.join(" ")
+    )
+}
+
+fn truncate_message(message: &str) -> String {
+    const MAX_LEN: usize = 4000;
+    if message.len() <= MAX_LEN {
+        return message.to_string();
+    }
+    let mut truncated = message
+        .chars()
+        .take(MAX_LEN.saturating_sub(16))
+        .collect::<String>();
+    truncated.push_str("\n...truncated");
+    truncated
+}
+
+fn deploy_key_remote_url(repo: &Repository) -> String {
+    format!(
+        "git@{}:{}/{}.git",
+        repo_ssh_host_alias(repo),
+        repo.owner,
+        repo.name
+    )
+}
+
+fn remote_result(
+    repo: &Repository,
+    local_path: &PathBuf,
+    remote_url: &str,
+    output: String,
+) -> RepoRemoteResultDto {
+    RepoRemoteResultDto {
+        repo_id: repo.id,
+        repo_full_name: repo.full_name.clone(),
+        local_path: path_arg(local_path),
+        remote_url: remote_url.to_string(),
+        output,
+    }
+}
+
+fn path_arg(path: &PathBuf) -> String {
+    path.to_string_lossy().to_string()
+}
+
+fn shell_quote(value: &str) -> String {
+    if value.is_empty() {
+        return "''".to_string();
+    }
+    format!("'{}'", value.replace('\'', "'\\''"))
+}
+
+async fn run_git_clone_task(
+    db: Database,
+    clone_tasks: Arc<Mutex<Vec<CloneTaskDto>>>,
+    prepared: PreparedClone,
+) {
+    let mut command = tokio::process::Command::new(git_program());
+    command
+        .arg("clone")
+        .arg("--progress")
+        .arg(&prepared.clone_url)
+        .current_dir(&prepared.parent_path)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+
+    let mut child = match command.spawn() {
+        Ok(child) => child,
+        Err(e) => {
+            finish_clone_task(
+                &db,
+                &clone_tasks,
+                prepared.task_id,
+                CloneTaskStatus::Failed,
+                None,
+                Some(format!("Failed to start git clone: {e}")),
+            )
+            .await;
+            return;
+        }
+    };
+
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<String>();
+    if let Some(stdout) = child.stdout.take() {
+        tokio::spawn(read_clone_stream(stdout, tx.clone()));
+    }
+    if let Some(stderr) = child.stderr.take() {
+        tokio::spawn(read_clone_stream(stderr, tx.clone()));
+    }
+    drop(tx);
+
+    let log_db = db.clone();
+    let log_tasks = clone_tasks.clone();
+    let log_task_id = prepared.task_id;
+    let log_collector = tokio::spawn(async move {
+        while let Some(chunk) = rx.recv().await {
+            append_clone_log(&log_db, &log_tasks, log_task_id, &chunk).await;
+        }
+    });
+
+    let wait_result = child.wait().await;
+    let _ = log_collector.await;
+
+    match wait_result {
+        Ok(status) if status.success() => {
+            finish_clone_task(
+                &db,
+                &clone_tasks,
+                prepared.task_id,
+                CloneTaskStatus::Succeeded,
+                status.code(),
+                None,
+            )
+            .await;
+        }
+        Ok(status) => {
+            let code = status.code();
+            finish_clone_task(
+                &db,
+                &clone_tasks,
+                prepared.task_id,
+                CloneTaskStatus::Failed,
+                code,
+                Some(format!(
+                    "git clone exited with status {}",
+                    code.map(|c| c.to_string())
+                        .unwrap_or_else(|| "unknown".to_string())
+                )),
+            )
+            .await;
+        }
+        Err(e) => {
+            finish_clone_task(
+                &db,
+                &clone_tasks,
+                prepared.task_id,
+                CloneTaskStatus::Failed,
+                None,
+                Some(format!("Failed while waiting for git clone: {e}")),
+            )
+            .await;
+        }
+    }
+}
+
+async fn read_clone_stream<R>(mut reader: R, tx: tokio::sync::mpsc::UnboundedSender<String>)
+where
+    R: AsyncRead + Unpin,
+{
+    let mut buf = [0_u8; 4096];
+    let mut pending = String::new();
+    loop {
+        match reader.read(&mut buf).await {
+            Ok(0) => {
+                let filtered = filtered_clone_log_chunk(&pending);
+                if !filtered.is_empty() {
+                    let _ = tx.send(filtered);
+                }
+                break;
+            }
+            Ok(n) => {
+                pending.push_str(&String::from_utf8_lossy(&buf[..n]));
+                let normalized = normalize_terminal_chunk(&pending);
+                let mut lines = normalized.split('\n').collect::<Vec<_>>();
+                pending = lines.pop().unwrap_or_default().to_string();
+                let filtered = lines
+                    .into_iter()
+                    .filter_map(filter_clone_log_line)
+                    .map(|line| format!("{line}\n"))
+                    .collect::<String>();
+                if !filtered.is_empty() && tx.send(filtered).is_err() {
+                    break;
+                }
+            }
+            Err(e) => {
+                let _ = tx.send(format!("\nFailed to read git output: {e}\n"));
+                break;
+            }
+        }
+    }
+}
+
+fn normalize_terminal_chunk(chunk: &str) -> String {
+    chunk.replace("\r\n", "\n").replace('\r', "\n")
+}
+
+fn filtered_clone_log_chunk(chunk: &str) -> String {
+    normalize_terminal_chunk(chunk)
+        .lines()
+        .filter_map(filter_clone_log_line)
+        .map(|line| format!("{line}\n"))
+        .collect()
+}
+
+fn filter_clone_log_line(line: &str) -> Option<String> {
+    let line = line.trim();
+    if line.is_empty() {
+        return None;
+    }
+
+    let keep = line.starts_with("Cloning into ")
+        || line.starts_with("remote: Enumerating objects:")
+        || line.starts_with("remote: Total ")
+        || (line.starts_with("remote: Counting objects:") && line.contains("done."))
+        || (line.starts_with("remote: Compressing objects:") && line.contains("done."))
+        || (line.starts_with("Receiving objects:") && line.contains("done."))
+        || (line.starts_with("Resolving deltas:") && line.contains("done."))
+        || line.starts_with("fatal:")
+        || line.starts_with("error:")
+        || line.starts_with("ssh:")
+        || line.contains("Permission denied")
+        || line.contains("Host key verification failed")
+        || line.contains("Repository not found");
+
+    keep.then(|| line.to_string())
+}
+
+fn new_clone_task(repo: &Repository, prepared: &PreparedClone) -> CloneTaskDto {
+    let command = format!("git clone {}", prepared.clone_url);
+    CloneTaskDto {
+        id: prepared.task_id,
+        repo_id: repo.id,
+        repo_full_name: repo.full_name.clone(),
+        repo_name: repo.name.clone(),
+        local_path: prepared.local_path.to_string_lossy().to_string(),
+        command: command.clone(),
+        status: CloneTaskStatus::Running,
+        log: String::new(),
+        started_at: now_secs(),
+        finished_at: None,
+        exit_code: None,
+        error: None,
+    }
+}
+
+fn push_clone_task(tasks: &Arc<Mutex<Vec<CloneTaskDto>>>, task: CloneTaskDto) {
+    tasks.lock().expect("clone task lock").insert(0, task);
+}
+
+fn snapshot_clone_tasks(tasks: &Arc<Mutex<Vec<CloneTaskDto>>>) -> Vec<CloneTaskDto> {
+    tasks.lock().expect("clone task lock").clone()
+}
+
+async fn append_clone_log(
+    db: &Database,
+    tasks: &Arc<Mutex<Vec<CloneTaskDto>>>,
+    task_id: u64,
+    chunk: &str,
+) {
+    let snapshot = {
+        let mut tasks = tasks.lock().expect("clone task lock");
+        if let Some(task) = tasks.iter_mut().find(|task| task.id == task_id) {
+            task.log.push_str(chunk);
+        }
+        tasks.clone()
+    };
+    if let Err(e) = persist_clone_task_snapshot(db, &snapshot).await {
+        tracing::warn!("Could not persist clone log: {}", e);
+    }
+}
+
+async fn finish_clone_task(
+    db: &Database,
+    tasks: &Arc<Mutex<Vec<CloneTaskDto>>>,
+    task_id: u64,
+    status: CloneTaskStatus,
+    exit_code: Option<i32>,
+    error: Option<String>,
+) {
+    let should_persist_clone_path = status == CloneTaskStatus::Succeeded;
+    let snapshot = {
+        let mut tasks = tasks.lock().expect("clone task lock");
+        if let Some(task) = tasks.iter_mut().find(|task| task.id == task_id) {
+            task.status = status.clone();
+            task.finished_at = Some(now_secs());
+            task.exit_code = exit_code;
+            task.error = error.clone();
+            if let Some(error) = &error {
+                if !task.log.ends_with('\n') {
+                    task.log.push('\n');
+                }
+                task.log.push_str(error);
+                task.log.push('\n');
+            }
+        }
+        tasks.clone()
+    };
+    if should_persist_clone_path {
+        if let Some(task) = snapshot.iter().find(|task| task.id == task_id) {
+            if let Err(e) = persist_repo_clone_path(db, task.repo_id, &task.local_path).await {
+                tracing::warn!("Could not persist repository clone path: {}", e);
+            }
+        }
+    }
+    if let Err(e) = persist_clone_task_snapshot(db, &snapshot).await {
+        tracing::warn!("Could not persist clone task completion: {}", e);
+    }
+}
+
+async fn persist_clone_tasks(
+    db: &Database,
+    tasks: &Arc<Mutex<Vec<CloneTaskDto>>>,
+) -> Result<(), String> {
+    let snapshot = snapshot_clone_tasks(tasks);
+    persist_clone_task_snapshot(db, &snapshot).await
+}
+
+async fn persist_clone_task_snapshot(
+    db: &Database,
+    snapshot: &[CloneTaskDto],
+) -> Result<(), String> {
+    let json = serde_json::to_string(snapshot).map_err(|e| e.to_string())?;
+    db.set_setting(CLONE_TASKS_SETTING_KEY, &json)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+async fn load_clone_tasks(db: &Database) -> Result<Vec<CloneTaskDto>, String> {
+    let Some(json) = db
+        .get_setting(CLONE_TASKS_SETTING_KEY)
+        .await
+        .map_err(|e| e.to_string())?
+    else {
+        return Ok(Vec::new());
+    };
+
+    let mut tasks: Vec<CloneTaskDto> = serde_json::from_str(&json).unwrap_or_else(|e| {
+        tracing::warn!("Could not parse persisted clone tasks: {}", e);
+        Vec::new()
+    });
+    let now = now_secs();
+    let mut changed = false;
+    for task in &mut tasks {
+        if task.status == CloneTaskStatus::Running {
+            task.status = CloneTaskStatus::Failed;
+            task.finished_at = Some(now);
+            task.error = Some("Clone was interrupted before the app closed.".to_string());
+            if !task.log.ends_with('\n') {
+                task.log.push('\n');
+            }
+            task.log
+                .push_str("Clone was interrupted before the app closed.\n");
+            changed = true;
+        }
+    }
+    if changed {
+        persist_clone_task_snapshot(db, &tasks).await?;
+    }
+    Ok(tasks)
+}
+
+fn now_secs() -> i64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_secs() as i64)
+        .unwrap_or_default()
+}
+
+fn git_program() -> &'static str {
+    if cfg!(target_os = "macos") {
+        "/usr/bin/git"
+    } else {
+        "git"
+    }
+}
+
+fn validate_repo_name(name: &str) -> Result<(), String> {
+    if name.trim().is_empty() || name.contains('/') || name.contains('\\') {
+        return Err(format!("Invalid repository name: {name}"));
+    }
+    Ok(())
+}
+
+fn repo_ssh_host_alias(repo: &Repository) -> String {
+    let readable = sanitize_host_part(&repo.full_name.replace('/', "-"));
+    format!("deploykeys-{}-{}", repo.id, readable)
+}
+
+fn sanitize_host_part(value: &str) -> String {
+    let mut out = String::new();
+    let mut last_dash = false;
+    for c in value.chars() {
+        let next = if c.is_ascii_alphanumeric() {
+            Some(c.to_ascii_lowercase())
+        } else if matches!(c, '-' | '_' | '.') {
+            Some('-')
+        } else {
+            None
+        };
+
+        if let Some(c) = next {
+            if c == '-' {
+                if !last_dash && !out.is_empty() {
+                    out.push(c);
+                }
+                last_dash = true;
+            } else {
+                out.push(c);
+                last_dash = false;
+            }
+        }
+    }
+    out.trim_matches('-').to_string()
+}
+
 // ---- App setup ------------------------------------------------------------
 
 /// Entry point shared by the binary. Opens the database, registers state and
@@ -440,16 +1276,24 @@ pub fn run() {
         .init();
 
     tauri::Builder::default()
+        .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
             // Resolve the data dir first so we can both open the database and,
             // in development, point the file-backed credential store at it —
             // all before the first command can touch the keyring or DB.
-            let db = tauri::async_runtime::block_on(async {
+            let (db, clone_tasks) = tauri::async_runtime::block_on(async {
                 let data_dir = resolve_data_dir().await?;
                 install_credential_backend(&data_dir);
-                open_database(&data_dir).await
+                let db = open_database(&data_dir).await?;
+                let clone_tasks =
+                    load_clone_tasks(&db)
+                        .await
+                        .map_err(|e| -> Box<dyn std::error::Error> {
+                            std::io::Error::new(std::io::ErrorKind::Other, e).into()
+                        })?;
+                Ok::<_, Box<dyn std::error::Error>>((db, clone_tasks))
             })?;
-            app.manage(AppState::new(db));
+            app.manage(AppState::new(db, clone_tasks));
 
             Ok(())
         })
@@ -471,6 +1315,11 @@ pub fn run() {
             get_public_key_content,
             ssh_key_files_exist,
             bind_deploy_key,
+            clone_repository,
+            list_clone_tasks,
+            clear_clone_tasks,
+            connect_repository_remote,
+            test_repository_remote,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
