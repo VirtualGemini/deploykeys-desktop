@@ -35,6 +35,12 @@ enum RepoRemoteAction {
 }
 
 #[derive(Clone, Copy)]
+enum ToastTone {
+    Error,
+    Success,
+}
+
+#[derive(Clone, Copy)]
 struct MoreMenuState {
     repo_id: i64,
     top: f64,
@@ -58,7 +64,7 @@ pub fn Repos(
     let clone_picker_running = RwSignal::new(None::<i64>);
     let clone_tasks = RwSignal::new(Vec::<api::CloneTask>::new());
     let clone_list_open = RwSignal::new(false);
-    let clone_log_task_id = RwSignal::new(None::<u64>);
+    let clone_expanded_task_id = RwSignal::new(None::<u64>);
     let more_repo_open = RwSignal::new(None::<MoreMenuState>);
     let remote_action_running = RwSignal::new(None::<(i64, RepoRemoteAction)>);
     let bind_repo = RwSignal::new(None::<Repo>);
@@ -157,6 +163,33 @@ pub fn Repos(
         on_cleanup(move || interval.clear());
     }
 
+    // Auto-dismiss toasts; the guard avoids clearing a newer message that replaced
+    // this one within the window. Both stay dismissable via their close button.
+    create_effect(move |_| {
+        if let Some(message) = error.get() {
+            set_timeout(
+                move || {
+                    if error.get_untracked().as_deref() == Some(message.as_str()) {
+                        error.set(None);
+                    }
+                },
+                Duration::from_secs(6),
+            );
+        }
+    });
+    create_effect(move |_| {
+        if let Some(message) = notice.get() {
+            set_timeout(
+                move || {
+                    if notice.get_untracked().as_deref() == Some(message.as_str()) {
+                        notice.set(None);
+                    }
+                },
+                Duration::from_secs(4),
+            );
+        }
+    });
+
     let clone_repo = move |repo: Repo| {
         if clone_picker_running.get_untracked().is_some() {
             return;
@@ -170,8 +203,8 @@ pub fn Repos(
                 Ok(Some(task)) => {
                     let task_id = task.id;
                     upsert_clone_task(clone_tasks, task);
-                    clone_log_task_id.set(Some(task_id));
-                    clone_list_open.set(false);
+                    clone_expanded_task_id.set(Some(task_id));
+                    clone_list_open.set(true);
                 }
                 Ok(None) => {}
                 Err(e) => error.set(Some(e)),
@@ -242,7 +275,7 @@ pub fn Repos(
     let page_count = Signal::derive(move || {
         let count = filtered_count.get();
         let size = page_size().get().max(1);
-        (count + size - 1) / size
+        count.div_ceil(size)
     });
 
     let safe_page = Signal::derive(move || page.get().clamp(1, page_count.get().max(1)));
@@ -448,16 +481,11 @@ pub fn Repos(
                     />
                 </div>
 
-                <Show when=move || error.get().is_some()>
-                    <div class="w-full p-3 text-sm rounded-lg border border-red-200 bg-red-50 text-red-700 dark:border-red-900 dark:bg-red-950 dark:text-red-300">
-                        {move || error.get().unwrap_or_default()}
-                    </div>
-                </Show>
-                <Show when=move || notice.get().is_some()>
-                    <div class="w-full p-3 text-sm rounded-lg border border-green-200 bg-green-50 text-green-700 dark:border-green-900 dark:bg-green-950 dark:text-green-300">
-                        {move || notice.get().unwrap_or_default()}
-                    </div>
-                </Show>
+                // Floating toast popups (error / success), bottom-right, above dialogs.
+                <div class="pointer-events-none fixed bottom-4 right-4 z-[120] flex flex-col items-end gap-2">
+                    <ToastPopup message=error tone=ToastTone::Error />
+                    <ToastPopup message=notice tone=ToastTone::Success />
+                </div>
 
                 <Show
                     when=move || !loading.get()
@@ -677,7 +705,7 @@ pub fn Repos(
             <CloneTasksDialog
                 open=clone_list_open
                 tasks=clone_tasks
-                selected_task_id=clone_log_task_id
+                selected_task_id=clone_expanded_task_id
                 on_clear=Callback::new(move |_| {
                     spawn_local(async move {
                         match api::clear_clone_tasks().await {
@@ -687,15 +715,11 @@ pub fn Repos(
                     });
                 })
             />
-            <CloneLogDialog
-                task_id=clone_log_task_id
-                tasks=clone_tasks
-            />
             <RepoMoreActionsDropdown
                 menu=more_repo_open
                 running=remote_action_running
-                on_connect=Callback::new(move |repo_id| connect_repo(repo_id))
-                on_test=Callback::new(move |repo_id| test_repo(repo_id))
+                on_connect=Callback::new(connect_repo)
+                on_test=Callback::new(test_repo)
             />
         </div>
     }
@@ -796,6 +820,94 @@ fn RepoMoreActionsDropdown(
     }
 }
 
+#[component]
+fn ToastPopup(message: RwSignal<Option<String>>, tone: ToastTone) -> impl IntoView {
+    let rendered = RwSignal::new(None::<String>);
+    let visible = RwSignal::new(false);
+    let generation = RwSignal::new(0_u64);
+
+    create_effect(move |_| {
+        generation.update(|value| *value += 1);
+        let current_generation = generation.get_untracked();
+        match message.get() {
+            Some(next) => {
+                rendered.set(Some(next));
+                visible.set(false);
+                set_timeout(
+                    move || {
+                        if generation.get_untracked() == current_generation
+                            && message.get_untracked().is_some()
+                        {
+                            visible.set(true);
+                        }
+                    },
+                    Duration::from_millis(16),
+                );
+            }
+            None if rendered.get_untracked().is_some() => {
+                visible.set(false);
+                set_timeout(
+                    move || {
+                        if generation.get_untracked() == current_generation
+                            && message.get_untracked().is_none()
+                        {
+                            rendered.set(None);
+                        }
+                    },
+                    Duration::from_millis(220),
+                );
+            }
+            None => {}
+        }
+    });
+
+    view! {
+        <Show when=move || rendered.get().is_some()>
+            <div class=move || toast_container_class(tone, visible.get())>
+                <span class="min-w-0 break-words">{move || rendered.get().unwrap_or_default()}</span>
+                <button
+                    type="button"
+                    title=move || t("common.cancel")
+                    aria-label=move || t("common.cancel")
+                    class=toast_close_class(tone)
+                    on:click=move |_| message.set(None)
+                >
+                    <Icon name=IconName::Close class="size-4" />
+                </button>
+            </div>
+        </Show>
+    }
+}
+
+fn toast_container_class(tone: ToastTone, visible: bool) -> String {
+    let base = "pointer-events-auto flex max-w-sm items-start gap-3 rounded-lg border p-3 text-sm shadow-lg transition-all duration-200 ease-out";
+    let tone_class = match tone {
+        ToastTone::Error => {
+            "border-red-200 bg-red-50 text-red-700 dark:border-red-900 dark:bg-red-950 dark:text-red-300"
+        }
+        ToastTone::Success => {
+            "border-green-200 bg-green-50 text-green-700 dark:border-green-900 dark:bg-green-950 dark:text-green-300"
+        }
+    };
+    let state = if visible {
+        "opacity-100 translate-y-0"
+    } else {
+        "opacity-0 translate-y-2"
+    };
+    format!("{base} {tone_class} {state}")
+}
+
+fn toast_close_class(tone: ToastTone) -> &'static str {
+    match tone {
+        ToastTone::Error => {
+            "inline-flex shrink-0 items-center justify-center size-5 rounded text-red-700/70 hover:text-red-700 focus:outline-none dark:text-red-300/70 dark:hover:text-red-300"
+        }
+        ToastTone::Success => {
+            "inline-flex shrink-0 items-center justify-center size-5 rounded text-green-700/70 hover:text-green-700 focus:outline-none dark:text-green-300/70 dark:hover:text-green-300"
+        }
+    }
+}
+
 fn upsert_clone_task(tasks: RwSignal<Vec<api::CloneTask>>, next: api::CloneTask) {
     tasks.update(|tasks| {
         if let Some(task) = tasks.iter_mut().find(|task| task.id == next.id) {
@@ -856,6 +968,40 @@ fn compact_clone_log_line(line: &str) -> Option<String> {
     keep.then(|| line.to_string())
 }
 
+/// Seconds-since-epoch cutoff for a range key; `None` means "all time".
+fn range_cutoff_secs(range: &str) -> Option<i64> {
+    let now = (js_sys::Date::now() / 1000.0) as i64;
+    let window = match range {
+        "5h" => 5 * 3600,
+        "12h" => 12 * 3600,
+        "24h" => 24 * 3600,
+        "7d" => 7 * 86_400,
+        "15d" => 15 * 86_400,
+        "30d" => 30 * 86_400,
+        "180d" => 180 * 86_400,
+        "365d" => 365 * 86_400,
+        _ => return None,
+    };
+    Some(now - window)
+}
+
+fn clone_range_options() -> Vec<(String, String)> {
+    [
+        ("5h", "repos.clone_range_5h"),
+        ("12h", "repos.clone_range_12h"),
+        ("24h", "repos.clone_range_24h"),
+        ("7d", "repos.clone_range_7d"),
+        ("15d", "repos.clone_range_15d"),
+        ("30d", "repos.clone_range_30d"),
+        ("180d", "repos.clone_range_180d"),
+        ("365d", "repos.clone_range_365d"),
+        ("all", "repos.clone_range_all"),
+    ]
+    .into_iter()
+    .map(|(value, key)| (value.to_string(), t(key).to_string()))
+    .collect()
+}
+
 #[component]
 fn CloneTasksDialog(
     open: RwSignal<bool>,
@@ -863,11 +1009,64 @@ fn CloneTasksDialog(
     selected_task_id: RwSignal<Option<u64>>,
     on_clear: Callback<()>,
 ) -> impl IntoView {
+    let search = RwSignal::new(String::new());
+    let range = RwSignal::new("5h".to_string());
+
     let has_clearable = Signal::derive(move || {
         tasks
             .get()
             .iter()
             .any(|task| task.status.as_str() != "running")
+    });
+
+    let range_options = Signal::derive(clone_range_options);
+
+    // name/path contains query (case-insensitive) AND started within the range.
+    // `tasks` repolls every 700 ms, so the time cutoff re-evaluates continuously.
+    let filtered = Signal::derive(move || {
+        let q = search.get().to_lowercase();
+        let cutoff = range_cutoff_secs(&range.get());
+        tasks
+            .get()
+            .into_iter()
+            .filter(|task| {
+                let matches_query = q.is_empty()
+                    || task.repo_full_name.to_lowercase().contains(&q)
+                    || task.local_path.to_lowercase().contains(&q);
+                let within_range = match cutoff {
+                    Some(c) => task.started_at >= c,
+                    None => true,
+                };
+                matches_query && within_range
+            })
+            .collect::<Vec<_>>()
+    });
+
+    // Keep the expanded task's terminal pinned to the bottom as output streams in.
+    // Only one task is expanded at a time, so a single ref/effect suffices.
+    let terminal_ref = NodeRef::<html::Div>::new();
+    // Stick-to-bottom: true while the user is parked at the bottom of the log, so
+    // streaming output follows; set false when they scroll up so it stops yanking.
+    let stick = RwSignal::new(true);
+    let expanded_task = create_memo(move |_| {
+        let id = selected_task_id.get()?;
+        tasks.with(|list| list.iter().find(|task| task.id == id).cloned())
+    });
+    // Memo dedups the 700 ms polls, so this only fires when the log actually grows,
+    // and only scrolls when the user is already at the bottom.
+    create_effect(move |_| {
+        let _ = expanded_task.get();
+        if !stick.get_untracked() {
+            return;
+        }
+        set_timeout(
+            move || {
+                if let Some(node) = terminal_ref.get_untracked() {
+                    node.set_scroll_top(node.scroll_height());
+                }
+            },
+            Duration::from_millis(16),
+        );
     });
 
     view! {
@@ -884,9 +1083,9 @@ fn CloneTasksDialog(
             <div
                 class=move || {
                     if open.get() {
-                        "w-full max-w-md max-h-[min(24rem,calc(100vh-6rem))] bg-surface border border-border rounded-xl shadow-2xl overflow-hidden scale-100 transition-transform duration-300 flex flex-col"
+                        "w-full max-w-[40rem] h-[min(32rem,calc(100vh-6rem))] bg-surface border border-border rounded-xl shadow-2xl overflow-hidden scale-100 transition-transform duration-300 flex flex-col"
                     } else {
-                        "w-full max-w-md max-h-[min(24rem,calc(100vh-6rem))] bg-surface border border-border rounded-xl shadow-2xl overflow-hidden scale-95 transition-transform duration-300 flex flex-col"
+                        "w-full max-w-[40rem] h-[min(32rem,calc(100vh-6rem))] bg-surface border border-border rounded-xl shadow-2xl overflow-hidden scale-95 transition-transform duration-300 flex flex-col"
                     }
                 }
                 on:click=|ev| ev.stop_propagation()
@@ -907,6 +1106,21 @@ fn CloneTasksDialog(
                     </button>
                 </div>
 
+                <div class="flex items-center gap-2 px-3 py-2 border-b border-border">
+                    <input
+                        type="text"
+                        class="flex-1 min-w-0 h-10 px-3 text-sm rounded-lg border border-border bg-bg text-content placeholder:text-muted focus:outline-none"
+                        placeholder=move || t("repos.clone_search_placeholder")
+                        prop:value=move || search.get()
+                        on:input=move |ev| search.set(event_target_value(&ev))
+                    />
+                    <FilterDropdown
+                        options=range_options
+                        selected=Signal::derive(move || range.get())
+                        on_select=Callback::new(move |value| range.set(value))
+                    />
+                </div>
+
                 <div class="min-h-0 flex-1 overflow-y-auto px-3 py-3">
                     <Show
                         when=move || !tasks.get().is_empty()
@@ -916,35 +1130,86 @@ fn CloneTasksDialog(
                             </div>
                         }
                     >
-                        <div class="space-y-1">
-                            <For
-                                each=move || tasks.get()
-                                key=|task| task.id
-                                children=move |task| {
-                                    let id = task.id;
-                                    view! {
-                                        <button
-                                            type="button"
-                                            class="group w-full rounded-lg px-3 py-2 text-left hover:bg-bg focus:outline-none focus:bg-bg"
-                                            on:click=move |_| {
-                                                selected_task_id.set(Some(id));
-                                                open.set(false);
-                                            }
-                                        >
-                                            <div class="flex items-center justify-between gap-3">
-                                                <div class="min-w-0">
-                                                    <div class="truncate text-sm font-medium text-content">{task.repo_full_name.clone()}</div>
-                                                    <div class="mt-1 truncate text-xs text-muted">{task.local_path.clone()}</div>
-                                                </div>
-                                                <span class=clone_status_class(&task.status)>
-                                                    {move || clone_status_label(&task.status)}
-                                                </span>
+                        <Show
+                            when=move || !filtered.get().is_empty()
+                            fallback=move || view! {
+                                <div class="px-3 py-10 text-center text-sm text-muted">
+                                    {move || t("repos.clone_no_match")}
+                                </div>
+                            }
+                        >
+                            <div class="space-y-1">
+                                <For
+                                    each=move || filtered.get()
+                                    key=|task| task.id
+                                    children=move |task| {
+                                        let id = task.id;
+                                        // Read live by id: <For> keeps existing children, so the
+                                        // streaming log/status must come from the signal, not the snapshot.
+                                        let task = create_memo(move |_| {
+                                            tasks.with(|list| list.iter().find(|task| task.id == id).cloned())
+                                        });
+                                        view! {
+                                            <div class="rounded-lg overflow-hidden">
+                                                <button
+                                                    type="button"
+                                                    class="group w-full rounded-lg px-3 py-1 text-left hover:bg-bg focus:outline-none focus:bg-bg"
+                                                    on:click=move |_| {
+                                                        if selected_task_id.get_untracked() == Some(id) {
+                                                            selected_task_id.set(None);
+                                                        } else {
+                                                            stick.set(true);
+                                                            selected_task_id.set(Some(id));
+                                                        }
+                                                    }
+                                                >
+                                                    <div class="flex items-center justify-between gap-3">
+                                                        <div class="min-w-0 truncate text-xs font-medium text-content">
+                                                            {move || task.get().map(|task| task.repo_full_name).unwrap_or_default()}
+                                                        </div>
+                                                        <span class=move || {
+                                                            task.get()
+                                                                .map(|task| clone_status_class(&task.status))
+                                                                .unwrap_or_default()
+                                                        }>
+                                                            {move || {
+                                                                task.get()
+                                                                    .map(|task| clone_status_label(&task.status))
+                                                                    .unwrap_or_default()
+                                                            }}
+                                                        </span>
+                                                    </div>
+                                                </button>
+                                                <Show when=move || selected_task_id.get() == Some(id)>
+                                                    <div class="px-3 pb-2 pt-1">
+                                                        <div class="truncate text-[11px] text-muted">
+                                                            {move || task.get().map(|task| task.local_path).unwrap_or_default()}
+                                                        </div>
+                                                        <div
+                                                            node_ref=terminal_ref
+                                                            class="mt-1 max-h-48 overflow-y-auto overscroll-contain rounded-md border border-zinc-800 bg-zinc-950 px-3 py-2"
+                                                            on:scroll=move |_| {
+                                                                if let Some(node) = terminal_ref.get_untracked() {
+                                                                    let distance = node.scroll_height() - node.scroll_top() - node.client_height();
+                                                                    stick.set(distance <= 40);
+                                                                }
+                                                            }
+                                                        >
+                                                            <pre class="m-0 whitespace-pre-wrap break-words font-mono text-[12px] leading-5 text-blue-100">{move || {
+                                                                task.get()
+                                                                    .map(|task| compact_clone_log(&task.log))
+                                                                    .filter(|log| !log.is_empty())
+                                                                    .unwrap_or_else(|| t("repos.clone_no_log").to_string())
+                                                            }}</pre>
+                                                        </div>
+                                                    </div>
+                                                </Show>
                                             </div>
-                                        </button>
+                                        }
                                     }
-                                }
-                            />
-                        </div>
+                                />
+                            </div>
+                        </Show>
                     </Show>
                 </div>
 
@@ -967,85 +1232,6 @@ fn CloneTasksDialog(
                 </div>
             </div>
         </div>
-    }
-}
-
-#[component]
-fn CloneLogDialog(
-    task_id: RwSignal<Option<u64>>,
-    tasks: RwSignal<Vec<api::CloneTask>>,
-) -> impl IntoView {
-    let terminal_ref = NodeRef::<html::Div>::new();
-    let selected_task = Signal::derive(move || {
-        let id = task_id.get()?;
-        tasks.get().into_iter().find(|task| task.id == id)
-    });
-
-    create_effect(move |_| {
-        let log_len = selected_task.get().map(|task| task.log.len()).unwrap_or(0);
-        if log_len == 0 {
-            return;
-        }
-        set_timeout(
-            move || {
-                if let Some(node) = terminal_ref.get() {
-                    node.set_scroll_top(node.scroll_height());
-                }
-            },
-            Duration::from_millis(20),
-        );
-    });
-
-    view! {
-        <Show when=move || selected_task.get().is_some()>
-            <div
-                class="fixed inset-0 z-[110] bg-black/55 backdrop-blur-sm flex items-center justify-center px-4 opacity-100 transition-opacity duration-300"
-                on:click=move |_| task_id.set(None)
-            >
-                <div
-                    class="w-full max-w-xl h-[min(22rem,calc(100vh-6rem))] overflow-hidden rounded-lg border border-zinc-800 bg-zinc-950 shadow-2xl flex flex-col"
-                    on:click=|ev| ev.stop_propagation()
-                >
-                    <div class="flex items-center justify-between gap-4 border-b border-zinc-800 px-3 py-2">
-                        <div class="min-w-0">
-                            <h2 class="truncate text-sm font-semibold text-zinc-100">{move || {
-                                selected_task
-                                    .get()
-                                    .map(|task| task.repo_full_name)
-                                    .unwrap_or_else(|| t("repos.clone_log_title").to_string())
-                            }}</h2>
-                            <p class="mt-1 truncate text-xs text-zinc-500">{move || {
-                                selected_task
-                                    .get()
-                                    .map(|task| task.local_path)
-                                    .unwrap_or_default()
-                            }}</p>
-                        </div>
-                        <button
-                            type="button"
-                            title=move || t("common.cancel")
-                            aria-label=move || t("common.cancel")
-                            class="inline-flex items-center justify-center size-8 rounded-md text-zinc-400 hover:bg-zinc-900 hover:text-zinc-100 focus:outline-none"
-                            on:click=move |_| task_id.set(None)
-                        >
-                            <Icon name=IconName::Close class="size-4" />
-                        </button>
-                    </div>
-                    <div
-                        node_ref=terminal_ref
-                        class="min-h-0 flex-1 overflow-y-auto bg-zinc-950 px-3 py-2"
-                    >
-                        <pre class="m-0 whitespace-pre-wrap break-words font-mono text-[12px] leading-5 text-blue-100">{move || {
-                            selected_task
-                                .get()
-                                .map(|task| compact_clone_log(&task.log))
-                                .filter(|log| !log.is_empty())
-                                .unwrap_or_else(|| t("repos.clone_no_log").to_string())
-                        }}</pre>
-                    </div>
-                </div>
-            </div>
-        </Show>
     }
 }
 

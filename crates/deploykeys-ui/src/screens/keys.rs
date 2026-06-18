@@ -118,7 +118,7 @@ pub fn Keys(#[allow(unused_variables)] pending_count: RwSignal<usize>) -> impl I
     let page_count = Signal::derive(move || {
         let count = filtered_count.get();
         let size = page_size().get().max(1);
-        (count + size - 1) / size
+        count.div_ceil(size)
     });
 
     let safe_page = Signal::derive(move || page.get().clamp(1, page_count.get().max(1)));
