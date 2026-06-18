@@ -14,7 +14,7 @@ use deploykeys_core::progress::{OperationId, ProgressReporter};
 use deploykeys_core::services::{AuthService, KeyBindingService, RepoSyncService, SshKeyService};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::sync::{
     atomic::{AtomicU64, Ordering},
@@ -776,7 +776,7 @@ async fn load_repo_clone_paths(db: &Database) -> Result<HashMap<i64, String>, St
     serde_json::from_str(&json).map_err(|e| e.to_string())
 }
 
-async fn ensure_git_remote_matches(local_path: &PathBuf, expected_url: &str) -> Result<(), String> {
+async fn ensure_git_remote_matches(local_path: &Path, expected_url: &str) -> Result<(), String> {
     let args = vec![
         "-C".to_string(),
         path_arg(local_path),
@@ -886,7 +886,7 @@ fn deploy_key_remote_url(repo: &Repository) -> String {
 
 fn remote_result(
     repo: &Repository,
-    local_path: &PathBuf,
+    local_path: &Path,
     remote_url: &str,
     output: String,
 ) -> RepoRemoteResultDto {
@@ -899,7 +899,7 @@ fn remote_result(
     }
 }
 
-fn path_arg(path: &PathBuf) -> String {
+fn path_arg(path: &Path) -> String {
     path.to_string_lossy().to_string()
 }
 
@@ -1289,7 +1289,7 @@ pub fn run() {
                     load_clone_tasks(&db)
                         .await
                         .map_err(|e| -> Box<dyn std::error::Error> {
-                            std::io::Error::new(std::io::ErrorKind::Other, e).into()
+                            std::io::Error::other(e).into()
                         })?;
                 Ok::<_, Box<dyn std::error::Error>>((db, clone_tasks))
             })?;

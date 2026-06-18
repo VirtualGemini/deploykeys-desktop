@@ -157,7 +157,7 @@ impl SshKeyService {
 
         let content = tokio::fs::read_to_string(&key.public_key_path)
             .await
-            .map_err(|e| Error::Io(e))?;
+            .map_err(Error::Io)?;
 
         Ok(content)
     }
