@@ -171,9 +171,7 @@ async fn run_password_remote_command(
     while let Some(message) = channel.wait().await {
         match message {
             ChannelMsg::Data { data } => stdout.extend_from_slice(data.as_ref()),
-            ChannelMsg::ExtendedData { data, ext } if ext == 1 => {
-                stderr.extend_from_slice(data.as_ref())
-            }
+            ChannelMsg::ExtendedData { data, ext: 1 } => stderr.extend_from_slice(data.as_ref()),
             ChannelMsg::ExitStatus { exit_status } => {
                 exit_code = Some(i32::try_from(exit_status).unwrap_or(i32::MAX));
             }

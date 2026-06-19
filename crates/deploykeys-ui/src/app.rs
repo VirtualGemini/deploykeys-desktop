@@ -86,6 +86,10 @@ pub fn App() -> impl IntoView {
     // Progress handle is also provided at root so the header bar can react to
     // backend progress events and simulated short operations.
     i18n::provide_locale(detect_locale());
+    // Keep <html lang> in sync with the locale signal so every switch point
+    // (bootstrap + the three entry points) updates it via one root effect
+    // rather than repeating the call at each site.
+    install_locale_sync_effect();
     theme::provide_theme(Theme::System);
     page_size::provide_page_size(DEFAULT_PAGE_SIZE);
     connection::provide_connection_state();
@@ -368,7 +372,7 @@ fn Main(
                 <div class="flex items-center gap-3">
                     <CommandPaletteTrigger on_open=Callback::new(move |_| palette_open.set(true)) />
                     <div class="flex items-center gap-1">
-                        <LanguageToggle progress=progress pending_count=pending_count />
+                        <LanguageToggle progress=progress />
                         <ThemeToggle />
                         <QuickRoutesMenu
                             current_section=current_section
@@ -786,6 +790,10 @@ fn CommandPalette(
     let query = RwSignal::new(String::new());
     let input_ref = NodeRef::<html::Input>::new();
     let selected = RwSignal::new(0_usize); // Keyboard-selected index
+                                           // When true, the palette shows the language list instead of commands — the
+                                           // "Change language" command flips this on, and the search box then filters
+                                           // locales. Picking a locale applies it and closes the whole palette.
+    let language_mode = RwSignal::new(false);
 
     // Search history: persisted to localStorage, max 10 items.
     let history = create_rw_signal({
@@ -837,7 +845,6 @@ fn CommandPalette(
     // Command definitions: (i18n key, icon, action). IconName resolves to
     // external SVG assets under assets/images/svg/icons.
     let all_commands = move || -> Vec<PaletteCommand> {
-        let locale = i18n::locale();
         let theme_signal = theme::theme();
         vec![
             (
@@ -864,20 +871,16 @@ fn CommandPalette(
                 "palette.change_language",
                 IconName::Globe,
                 Box::new(move || {
-                    let next = match locale.get_untracked() {
-                        Locale::En => Locale::Zh,
-                        Locale::Zh => Locale::En,
-                    };
-                    locale.set(next);
-                    let code = next.code();
-                    let sim = progress.begin_simulated();
-                    let toast = ToastHandle::expect();
-                    spawn_local(async move {
-                        let _ = api::set_language(code).await;
-                        toast.success(t("settings.language_changed"));
-                        progress.end_simulated(&sim);
-                    });
-                    open.set(false);
+                    // Switch the palette into language-picker mode: the existing
+                    // search input then filters the 31 languages (via the shared
+                    // LanguagePicker) instead of the command list, and picking
+                    // one applies it through the same apply_locale path as the
+                    // header/settings entry points. This replaces the old
+                    // hardcoded En<->Zh toggle, which could not express "switch
+                    // to any language" once the enum grew past two variants.
+                    language_mode.set(true);
+                    query.set(String::new());
+                    selected.set(0);
                 }),
             ),
         ]
@@ -912,11 +915,23 @@ fn CommandPalette(
         }
     };
 
-    // Open: reset query, selected, focus input.
+    // In language mode the list is the query-filtered locales (same matching
+    // rule as the shared picker), so keyboard nav applies to it too.
+    let filtered_locales = move || -> Vec<Locale> {
+        let q = query.get();
+        Locale::ALL
+            .iter()
+            .copied()
+            .filter(|&loc| locale_matches(loc, &q))
+            .collect()
+    };
+
+    // Open: reset query, selected, language mode, focus input.
     create_effect(move |_| {
         if open.get() {
             query.set(String::new());
             selected.set(0);
+            language_mode.set(false);
             request_animation_frame(move || {
                 if let Some(input) = input_ref.get() {
                     let _ = input.focus();
@@ -925,7 +940,8 @@ fn CommandPalette(
         }
     });
 
-    // Keyboard: ESC close, ArrowUp/Down navigate, Enter execute.
+    // Keyboard: ESC close (exits language mode first if active), ArrowUp/Down
+    // navigate whichever list is showing, Enter runs the selection.
     let handle = window_event_listener(ev::keydown, move |ev| {
         if !open.get_untracked() {
             return;
@@ -933,24 +949,48 @@ fn CommandPalette(
         let key = ev.key();
         if key.eq_ignore_ascii_case("escape") {
             ev.prevent_default();
-            open.set(false);
+            // In language mode, ESC steps back to the command list instead of
+            // closing the palette outright.
+            if language_mode.get_untracked() {
+                language_mode.set(false);
+                query.set(String::new());
+                selected.set(0);
+            } else {
+                open.set(false);
+            }
         } else if key == "ArrowDown" {
             ev.prevent_default();
-            let items = filtered();
-            if !items.is_empty() {
-                selected.update(|s| *s = (*s + 1).min(items.len() - 1));
+            let len = if language_mode.get_untracked() {
+                filtered_locales().len()
+            } else {
+                filtered().len()
+            };
+            if len > 0 {
+                selected.update(|s| *s = (*s + 1).min(len - 1));
             }
         } else if key == "ArrowUp" {
             ev.prevent_default();
             selected.update(|s| *s = s.saturating_sub(1));
         } else if key == "Enter" {
             ev.prevent_default();
-            let items = filtered();
-            let idx = selected.get_untracked();
-            if idx < items.len() {
-                let (label, _icon, action) = &items[idx];
-                save_history(label);
-                action();
+            if language_mode.get_untracked() {
+                let locales = filtered_locales();
+                let idx = selected.get_untracked();
+                if idx < locales.len() {
+                    apply_locale(locales[idx], progress);
+                    language_mode.set(false);
+                    query.set(String::new());
+                    selected.set(0);
+                    open.set(false);
+                }
+            } else {
+                let items = filtered();
+                let idx = selected.get_untracked();
+                if idx < items.len() {
+                    let (label, _icon, action) = &items[idx];
+                    save_history(label);
+                    action();
+                }
             }
         }
     });
@@ -976,7 +1016,13 @@ fn CommandPalette(
                                 query.set(event_target_value(&ev));
                                 selected.set(0);
                             }
-                            placeholder=move || t("palette.placeholder")
+                            placeholder=move || {
+                                if language_mode.get() {
+                                    t("settings.language_search_placeholder")
+                                } else {
+                                    t("palette.placeholder")
+                                }
+                            }
                             class="flex-1 text-base bg-transparent text-content placeholder:text-muted focus:outline-none"
                         />
                     </div>
@@ -984,58 +1030,107 @@ fn CommandPalette(
                     // Results list (scrollable)
                     <div class="max-h-96 overflow-y-auto py-2 px-2">
                         {move || {
-                            let items = filtered();
-                            let q = query.get();
-                            if items.is_empty() && !q.is_empty() {
-                                view! {
-                                    <div class="py-8 text-center text-sm text-muted">
-                                        {move || t("palette.no_results")}
-                                    </div>
-                                }.into_view()
-                            } else if items.is_empty() {
-                                view! {
-                                    <div class="py-8 text-center text-sm text-muted">
-                                        {move || t("palette.empty_history")}
-                                    </div>
-                                }.into_view()
-                            } else {
-                                let is_history = q.is_empty();
-                                items.into_iter().enumerate().map(|(idx, (label, icon_opt, action))| {
-                                    let active = move || selected.get() == idx;
-                                    let label_clone = label.clone();
+                            // Language sub-mode: render the filtered locales with
+                            // the same keyboard-select/hover interaction as the
+                            // command list, so arrows + Enter work here too.
+                            if language_mode.get() {
+                                let locales = filtered_locales();
+                                if locales.is_empty() {
                                     view! {
-                                        <div
-                                            class="flex items-center gap-3 py-2.5 px-3 rounded-lg text-sm cursor-pointer"
-                                            class:bg-primary=active
-                                            class:text-on-primary=active
-                                            class:text-content=move || !active()
-                                            class:hover:bg-bg=move || !active()
-                                            on:click=move |_| {
-                                                save_history(&label_clone);
-                                                action();
-                                            }
-                                            on:mouseenter=move |_| selected.set(idx)
-                                        >
-                                            {move || match icon_opt {
-                                                Some(icon) => view! { <Icon name=icon class="size-5" /> }.into_view(),
-                                                None => view! { <div class="shrink-0 size-5"></div> }.into_view(),
-                                            }}
-                                            <span class="flex-1">{label.clone()}</span>
-                                            <Show when=move || is_history && active()>
-                                                <button
-                                                    type="button"
-                                                    class="shrink-0 size-5 flex items-center justify-center rounded text-on-primary/70 hover:text-on-primary"
-                                                    on:click=move |ev| {
-                                                        ev.stop_propagation();
-                                                        delete_history(idx);
-                                                    }
-                                                >
-                                                    <Icon name=IconName::Close class="size-3" />
-                                                </button>
-                                            </Show>
+                                        <div class="py-8 text-center text-sm text-muted">
+                                            {move || t("settings.language_no_results")}
                                         </div>
-                                    }
-                                }).collect_view()
+                                    }.into_view()
+                                } else {
+                                    locales.into_iter().enumerate().map(|(idx, loc)| {
+                                        let active = move || selected.get() == idx;
+                                        let is_current = move || i18n::locale().get() == loc;
+                                        view! {
+                                            <div
+                                                class="flex items-center gap-3 py-2.5 px-3 rounded-lg text-sm cursor-pointer"
+                                                class:bg-primary=active
+                                                class:text-on-primary=active
+                                                class:text-content=move || !active()
+                                                class:hover:bg-bg=move || !active()
+                                                on:click=move |_| {
+                                                    apply_locale(loc, progress);
+                                                    language_mode.set(false);
+                                                    query.set(String::new());
+                                                    selected.set(0);
+                                                    open.set(false);
+                                                }
+                                                on:mouseenter=move |_| selected.set(idx)
+                                            >
+                                                {move || {
+                                                    let class = if is_current() {
+                                                        "size-5 text-on-primary"
+                                                    } else {
+                                                        "size-5 text-on-primary opacity-0"
+                                                    };
+                                                    view! { <Icon name=IconName::Check class=class /> }
+                                                }}
+                                                <span class="flex-1">{loc.native_name()}</span>
+                                                <span class="text-xs uppercase tracking-wide opacity-70">
+                                                    {loc.code()}
+                                                </span>
+                                            </div>
+                                        }
+                                    }).collect_view()
+                                }
+                            } else {
+                                let items = filtered();
+                                let q = query.get();
+                                if items.is_empty() && !q.is_empty() {
+                                    view! {
+                                        <div class="py-8 text-center text-sm text-muted">
+                                            {move || t("palette.no_results")}
+                                        </div>
+                                    }.into_view()
+                                } else if items.is_empty() {
+                                    view! {
+                                        <div class="py-8 text-center text-sm text-muted">
+                                            {move || t("palette.empty_history")}
+                                        </div>
+                                    }.into_view()
+                                } else {
+                                    let is_history = q.is_empty();
+                                    items.into_iter().enumerate().map(|(idx, (label, icon_opt, action))| {
+                                        let active = move || selected.get() == idx;
+                                        let label_clone = label.clone();
+                                        view! {
+                                            <div
+                                                class="flex items-center gap-3 py-2.5 px-3 rounded-lg text-sm cursor-pointer"
+                                                class:bg-primary=active
+                                                class:text-on-primary=active
+                                                class:text-content=move || !active()
+                                                class:hover:bg-bg=move || !active()
+                                                on:click=move |_| {
+                                                    save_history(&label_clone);
+                                                    action();
+                                                }
+                                                on:mouseenter=move |_| selected.set(idx)
+                                            >
+                                                {move || match icon_opt {
+                                                    Some(icon) => view! { <Icon name=icon class="size-5" /> }.into_view(),
+                                                    None => view! { <div class="shrink-0 size-5"></div> }.into_view(),
+                                                }}
+                                                <span class="flex-1">{label.clone()}</span>
+                                                <Show when=move || is_history && active()>
+                                                    <button
+                                                        type="button"
+                                                        class="shrink-0 size-5 flex items-center justify-center rounded text-on-primary/70 hover:text-on-primary"
+                                                        on:click=move |ev| {
+                                                            ev.stop_propagation();
+                                                            delete_history(idx);
+                                                        }
+                                                    >
+                                                        <Icon name=IconName::Close class="size-3" />
+                                                    </button>
+                                                </Show>
+                                            </div>
+                                        }
+                                    }).collect_view()
+                                }
                             }
                         }}
                     </div>
@@ -1219,8 +1314,11 @@ fn SettingsPage(
                         <h1 class="text-xl font-semibold leading-7 text-content">{move || t("settings.title")}</h1>
                     </div>
 
-                    <div class="mt-8 grid flex-1 min-h-0 grid-cols-[6rem_minmax(0,1fr)] gap-4 sm:gap-6">
-                        <aside class="min-h-0 overflow-hidden border-r border-border pr-3">
+                    <div
+                        class="mt-8 grid flex-1 min-h-0 gap-4 sm:gap-6"
+                        style:grid-template-columns=move || settings_grid_columns()
+                    >
+                        <aside class="min-h-0 overflow-visible border-r border-border pr-3">
                             <nav class="flex flex-col gap-1">
                                 <SettingsTabButton
                                     tab=SettingsTab::General
@@ -1240,7 +1338,7 @@ fn SettingsPage(
                             </nav>
                         </aside>
 
-                        <div class="min-h-0 min-w-0 overflow-hidden">
+                        <div class="min-h-0 min-w-0 overflow-visible">
                             {move || match active_tab.get() {
                                 SettingsTab::General => view! {
                                     <div class="border-y border-border divide-y divide-border">
@@ -1283,10 +1381,24 @@ fn SettingsTabButton(
 
 fn settings_tab_button_class(active: bool) -> &'static str {
     if active {
-        "w-full flex h-10 items-center truncate rounded-lg bg-primary-soft px-3 text-sm font-medium text-primary focus:outline-none"
+        "w-full flex h-10 items-center whitespace-nowrap rounded-lg bg-primary-soft px-3 text-sm font-medium text-primary focus:outline-none"
     } else {
-        "w-full flex h-10 items-center truncate rounded-lg px-3 text-sm font-medium text-muted hover:bg-surface hover:text-content focus:outline-none"
+        "w-full flex h-10 items-center whitespace-nowrap rounded-lg px-3 text-sm font-medium text-muted hover:bg-surface hover:text-content focus:outline-none"
     }
+}
+
+fn settings_grid_columns() -> String {
+    let longest = [
+        t("settings.general"),
+        t("settings.key_storage"),
+        t("settings.config_file"),
+    ]
+    .into_iter()
+    .map(|label| label.chars().count())
+    .max()
+    .unwrap_or(0);
+    let menu_rem = (3.0 + longest as f64 * 0.58).clamp(6.0, 14.0);
+    format!("minmax(6rem, {menu_rem:.2}rem) minmax(16rem, 1fr)")
 }
 
 #[component]
@@ -1498,19 +1610,13 @@ fn ConfigFileSettingsTab(
 #[component]
 fn LanguageSettingRow(progress: ProgressHandle) -> impl IntoView {
     let locale = i18n::locale();
+    let open = RwSignal::new(false);
+    let query = RwSignal::new(String::new());
+
     let select = move |next: Locale| {
-        if locale.get_untracked() == next {
-            return;
-        }
-        locale.set(next);
-        let code = next.code();
-        let sim = progress.begin_simulated();
-        let toast = ToastHandle::expect();
-        spawn_local(async move {
-            let _ = api::set_language(code).await;
-            toast.success(t("settings.language_changed"));
-            progress.end_simulated(&sim);
-        });
+        apply_locale(next, progress);
+        open.set(false);
+        query.set(String::new());
     };
 
     view! {
@@ -1518,25 +1624,55 @@ fn LanguageSettingRow(progress: ProgressHandle) -> impl IntoView {
             <div class="min-w-0">
                 <p class="text-sm font-medium text-content">{move || t("settings.language")}</p>
             </div>
-            <div class="inline-flex w-fit flex-wrap gap-1 rounded-lg border border-border bg-surface p-1">
-                {Locale::ALL.iter().copied().map(|loc| {
-                    let active = move || locale.get() == loc;
-                    view! {
-                        <button
-                            type="button"
-                            class=move || {
-                                if active() {
-                                    "inline-flex h-8 items-center gap-2 rounded-md bg-primary px-3 text-sm font-medium text-on-primary"
-                                } else {
-                                    "inline-flex h-8 items-center gap-2 rounded-md px-3 text-sm font-medium text-muted hover:bg-bg hover:text-content"
-                                }
-                            }
-                            on:click=move |_| select(loc)
-                        >
-                            <span>{loc.native_name()}</span>
-                        </button>
-                    }
-                }).collect_view()}
+            // Compact trigger button showing the current language name + globe,
+            // opening the same shared picker as the header dropdown. Replacing
+            // the old segmented buttons (which only scaled to 2–3 languages).
+            <div class="relative w-full sm:w-auto sm:self-end">
+                <button
+                    type="button"
+                    aria-haspopup="listbox"
+                    aria-expanded=move || open.get()
+                    class="inline-flex w-full sm:w-[min(100%,16rem)] h-9 items-center justify-between gap-2 rounded-lg border border-border bg-surface px-3 text-sm font-medium text-content hover:bg-bg focus:outline-none"
+                    on:click=move |_| open.update(|o| *o = !*o)
+                >
+                    <span class="flex items-center gap-2 min-w-0">
+                        <Icon name=IconName::Globe class="size-4 shrink-0 text-muted" />
+                        <span class="truncate">{move || locale.get().native_name()}</span>
+                    </span>
+                    <Icon name=IconName::ChevronRight class="size-4 shrink-0 rotate-90 text-muted" />
+                </button>
+
+                <Show when=move || open.get()>
+                    <div
+                        class="fixed inset-0 z-40"
+                        on:click=move |_| {
+                            open.set(false);
+                            query.set(String::new());
+                        }
+                    ></div>
+
+                    // Right-aligned dropdown within the settings content area.
+                    // It starts at the trigger-friendly settings width and grows
+                    // when filtered language labels need more room, capped by
+                    // the viewport so narrow screens do not overflow.
+                    <div
+                        class="absolute end-0 mt-2 z-50 max-h-[min(420px,calc(100vh-96px))] flex flex-col p-1 bg-surface border border-border rounded-xl shadow-xl"
+                        style:width=move || language_menu_width(&query.get(), 20.0)
+                    >
+                        <div class="shrink-0 px-1 pb-1">
+                            <input
+                                type="text"
+                                prop:value=move || query.get()
+                                on:input=move |ev| query.set(event_target_value(&ev))
+                                placeholder=move || t("settings.language_search_placeholder")
+                                class="w-full h-8 px-2.5 text-sm bg-bg text-content placeholder:text-muted rounded-md border border-border focus:outline-none focus:border-primary"
+                            />
+                        </div>
+                        <div class="min-h-0 flex-1 overflow-y-auto p-0.5">
+                            <LanguagePicker query=query on_select=Callback::new(select) />
+                        </div>
+                    </div>
+                </Show>
             </div>
         </div>
     }
@@ -1589,32 +1725,175 @@ fn settings_theme_button_class(active: bool) -> &'static str {
     }
 }
 
-/// Language picker: an icon button that opens a dropdown listing every
-/// supported locale (driven by `Locale::ALL`, so adding languages needs no
-/// markup changes here). Selecting one applies it and persists the choice to
-/// the backend. Styled after Preline's dropdown (rounded, bordered, shadowed
-/// panel with hover rows and a check on the active item). Open/close is driven
-/// by a local signal — no Preline JS — and a transparent full-screen backdrop
-/// catches click-outside to close.
+/// Apply a locale everywhere it matters: set the reactive signal (which
+/// re-renders every `t(...)` call), update `<html lang>`/`<html dir>` for the
+/// new language/RTL state, persist the choice through `set_language`, and toast
+/// the change. All three language entry points route through this so they stay
+/// in lockstep — there is no third copy of the switch/persist/toast logic.
+fn apply_locale(next: Locale, progress: ProgressHandle) {
+    let locale = i18n::locale();
+    if locale.get_untracked() == next {
+        return;
+    }
+    locale.set(next);
+    let code = next.code();
+    let sim = progress.begin_simulated();
+    let toast = ToastHandle::expect();
+    spawn_local(async move {
+        let saved = api::set_language(code).await;
+        let current = locale.get_untracked();
+        if current.code() != code {
+            // Language changes can be clicked faster than IPC writes complete.
+            // If this older save finishes after a newer selection, repair the
+            // persisted value so restart restores the language the user ended on.
+            let _ = api::set_language(current.code()).await;
+            progress.end_simulated(&sim);
+            return;
+        }
+        if saved.is_ok() {
+            toast.success(t("settings.language_changed"));
+        }
+        progress.end_simulated(&sim);
+    });
+}
+
+/// Mirror the reactive locale onto the document element so the browser (and
+/// screen readers) know the active language. The app shell intentionally stays
+/// LTR even for Arabic; setting `dir=rtl` on `<html>` mirrors every layout-level
+/// logical class and makes the whole product chrome flip sides.
+fn install_locale_sync_effect() {
+    create_effect(move |_| {
+        let loc = i18n::locale().get();
+        apply_html_language(loc);
+    });
+}
+
+/// Write `<html lang>` for a locale and keep global layout direction stable.
+/// No-op if the document can't be reached (e.g. outside the browser).
+fn apply_html_language(loc: Locale) {
+    let Some(doc) = (|| web_sys::window()?.document())() else {
+        return;
+    };
+    let html = doc.document_element();
+    if let Some(html) = html {
+        let _ = html.set_attribute("lang", loc.code());
+        let _ = html.set_attribute("dir", "ltr");
+    }
+}
+
+/// Does `query` match `loc`? Case-insensitive substring match against the
+/// locale's native name, English name, code, and any search aliases. An empty
+/// query matches everything (so the picker shows the full list by default).
+fn locale_matches(loc: Locale, query: &str) -> bool {
+    let q = query.trim().to_ascii_lowercase();
+    if q.is_empty() {
+        return true;
+    }
+    if loc.native_name().to_ascii_lowercase().contains(&q) {
+        return true;
+    }
+    if loc.english_name().to_ascii_lowercase().contains(&q) {
+        return true;
+    }
+    if loc.code().to_ascii_lowercase().contains(&q) {
+        return true;
+    }
+    loc.search_aliases()
+        .iter()
+        .any(|alias| alias.to_ascii_lowercase().contains(&q))
+}
+
+/// Width for the language menus: keep a stable base width, but expand when the
+/// visible language labels or localized placeholder need more horizontal room.
+/// The CSS `min()` cap keeps the menu inside the viewport on small screens.
+fn language_menu_width(query: &str, base_rem: f64) -> String {
+    let longest_label = Locale::ALL
+        .iter()
+        .copied()
+        .filter(|&loc| locale_matches(loc, query))
+        .map(|loc| loc.native_name().chars().count() + loc.code().chars().count())
+        .max()
+        .unwrap_or(0)
+        .max(t("settings.language_search_placeholder").chars().count());
+    let content_rem = 7.5 + (longest_label as f64 * 0.58);
+    let width_rem = base_rem.max(content_rem).min(32.0);
+    format!("min(calc(100vw - 2rem), {width_rem:.2}rem)")
+}
+
+/// Shared, searchable language list used by all three language entry points
+/// (top dropdown, settings row, and the command palette's language sub-mode).
+/// It only renders the list and reports a selection via `on_select` — the
+/// caller owns open/close state and the apply/persist logic, so the same picker
+/// can be hosted in a dropdown, a settings row, or an inline palette list.
+///
+/// Rows are compact (~30px): a fixed-width check slot keeps text from shifting
+/// between selected/unselected, the native name leads, and a muted short code
+/// sits on the right. An empty filter shows the dedicated "no results" string.
 #[component]
-fn LanguageToggle(
-    progress: ProgressHandle,
-    #[allow(unused_variables)] pending_count: RwSignal<usize>,
+fn LanguagePicker(
+    #[prop(into)] query: Signal<String>,
+    on_select: Callback<Locale>,
 ) -> impl IntoView {
     let locale = i18n::locale();
+    let filtered = move || {
+        let q = query.get();
+        Locale::ALL
+            .iter()
+            .copied()
+            .filter(|&loc| locale_matches(loc, &q))
+            .collect::<Vec<_>>()
+    };
+    view! {
+        {move || {
+            let items = filtered();
+            if items.is_empty() {
+                view! {
+                    <div class="py-8 text-center text-sm text-muted">
+                        {move || t("settings.language_no_results")}
+                    </div>
+                }.into_view()
+            } else {
+                items.into_iter().map(|loc| {
+                    let active = move || locale.get() == loc;
+                    view! {
+                        <button
+                            type="button"
+                            class="w-full flex items-center gap-x-2.5 h-8 px-2.5 rounded-lg text-sm text-content hover:bg-bg focus:outline-none focus:bg-bg"
+                            on:click=move |_| on_select.call(loc)
+                        >
+                            {move || {
+                                let class = if active() {
+                                    "size-4 text-primary"
+                                } else {
+                                    "size-4 text-primary opacity-0"
+                                };
+                                view! { <Icon name=IconName::Check class=class /> }
+                            }}
+                            <span class="grow text-start truncate">{loc.native_name()}</span>
+                            <span class="shrink-0 text-[10px] uppercase tracking-wide text-muted">
+                                {loc.code()}
+                            </span>
+                        </button>
+                    }
+                }).collect_view()
+            }
+        }}
+    }
+}
+
+/// Language toggle in the header: a globe icon button that opens a compact,
+/// searchable dropdown listing every supported locale. Selecting one applies it
+/// and persists the choice. Open/close is driven by a local signal and a
+/// full-screen transparent backdrop catches click-outside.
+#[component]
+fn LanguageToggle(progress: ProgressHandle) -> impl IntoView {
     let open = RwSignal::new(false);
+    let query = RwSignal::new(String::new());
 
     let select = move |next: Locale| {
-        locale.set(next);
+        apply_locale(next, progress);
         open.set(false);
-        let code = next.code();
-        let sim = progress.begin_simulated();
-        let toast = ToastHandle::expect();
-        spawn_local(async move {
-            let _ = api::set_language(code).await;
-            toast.success(t("settings.language_changed"));
-            progress.end_simulated(&sim);
-        });
+        query.set(String::new());
     };
 
     view! {
@@ -1628,31 +1907,35 @@ fn LanguageToggle(
 
             <Show when=move || open.get()>
                 // Click-outside backdrop: a transparent full-screen layer behind
-                // the menu that closes it when clicked.
-                <div class="fixed inset-0 z-40" on:click=move |_| open.set(false)></div>
+                // the menu that closes it (and clears the search) when clicked.
+                <div
+                    class="fixed inset-0 z-40"
+                    on:click=move |_| {
+                        open.set(false);
+                        query.set(String::new());
+                    }
+                ></div>
 
-                // Dropdown panel (Preline dropdown spec).
-                <div class="absolute end-0 mt-2 z-50 w-44 max-h-80 overflow-y-auto p-1 bg-surface border border-border rounded-xl shadow-xl">
-                    {Locale::ALL.iter().copied().map(|loc| {
-                        let active = move || locale.get() == loc;
-                        view! {
-                            <button
-                                type="button"
-                                class="w-full flex items-center gap-x-3 py-2 px-2.5 rounded-lg text-sm text-content hover:bg-bg focus:outline-none focus:bg-bg"
-                                on:click=move |_| select(loc)
-                            >
-                                {move || {
-                                    let class = if active() {
-                                        "size-4 text-primary"
-                                    } else {
-                                        "size-4 text-primary opacity-0"
-                                    };
-                                    view! { <Icon name=IconName::Check class=class /> }
-                                }}
-                                <span class="grow text-left">{loc.native_name()}</span>
-                            </button>
-                        }
-                    }).collect_view()}
+                // Dropdown panel. It keeps the compact base width, expands for
+                // longer language names, and is capped by the viewport.
+                <div
+                    class="absolute end-0 mt-2 z-50 max-h-[min(420px,calc(100vh-96px))] flex flex-col p-1 bg-surface border border-border rounded-xl shadow-xl"
+                    style:width=move || language_menu_width(&query.get(), 16.0)
+                >
+                    // Sticky search input at the top of the panel.
+                    <div class="shrink-0 px-1 pb-1">
+                        <input
+                            type="text"
+                            prop:value=move || query.get()
+                            on:input=move |ev| query.set(event_target_value(&ev))
+                            placeholder=move || t("settings.language_search_placeholder")
+                            class="w-full h-8 px-2.5 text-sm bg-bg text-content placeholder:text-muted rounded-md border border-border focus:outline-none focus:border-primary"
+                        />
+                    </div>
+                    // Scrollable language list (shared picker).
+                    <div class="min-h-0 flex-1 overflow-y-auto p-0.5">
+                        <LanguagePicker query=query on_select=Callback::new(select) />
+                    </div>
                 </div>
             </Show>
         </div>

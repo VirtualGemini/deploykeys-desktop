@@ -14,6 +14,7 @@ A secure, user-friendly desktop application for managing GitHub Deploy Keys with
 - 🔒 **Private Key Isolation** - Keys never leave the target environment
 - ✅ **Drift Detection** - Validation and status monitoring
 - 🔐 **Secure Credential Storage** - Uses system keychain (macOS/Linux)
+- 🌐 **Internationalization** - 31 interface languages with runtime switching and Arabic RTL support
 
 ## 🚀 Quick Start
 
@@ -91,6 +92,42 @@ make check      # Run all checks (fmt + clippy + test)
 make audit      # Security audit
 make db-setup   # (Re)create the sqlx compile-time check database
 ```
+
+## 🌐 Internationalization
+
+The UI ships in **31 interface languages** and switches at runtime — no restart
+needed. The preference is persisted via the same `app_settings` store as the
+rest of the app, and a legacy value (`zh`) is still recognized as Simplified
+Chinese after an upgrade.
+
+**Supported languages:** English, 简体中文, 繁體中文, 日本語, Español, العربية,
+Português, Bahasa Indonesia, 한국어, Français, Deutsch, Italiano, Русский, ไทย,
+Tiếng Việt, Türkçe, Polski, Nederlands, Svenska, Dansk, Norsk, Suomi, Čeština,
+Slovenčina, Română, Українська, Magyar, हिन्दी, বাংলা, Bahasa Melayu, Filipino.
+
+The language can be changed from three places, all backed by the same shared,
+searchable picker:
+
+- The **globe button** in the top bar
+- **Settings → Language**
+- The **command palette** (`⌘K` / `Ctrl+K`) → "Change language"
+
+Arabic flips the whole document to right-to-left (`<html dir="rtl">`); every
+other language is left-to-right.
+
+Translations live in a single inline table at
+`crates/deploykeys-ui/src/i18n.rs` (kept wasm-friendly rather than loaded from
+external files). English is the baseline and always complete; any missing key
+falls back to English. A key-set consistency test enforces that **every**
+language table exposes the exact same keys as English with no duplicates, so a
+partially-translated table can't silently ship. Adding a language is a
+three-step change:
+
+1. Add a `Locale` variant + a row in `Locale::ALL` (and the metadata methods).
+2. Add a translation `const` table whose keys match `EN` exactly.
+3. Wire it into `lookup()` and the `table_for` test helper.
+
+Then `cargo test -p deploykeys-ui --bin deploykeys-ui i18n::` confirms parity.
 
 ## 🛡️ Security
 
