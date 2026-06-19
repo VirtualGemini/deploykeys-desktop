@@ -15,7 +15,7 @@ use deploykeys_core::progress::{OperationId, ProgressReporter};
 use deploykeys_core::services::{
     AuthService, KeyBindingService, RepoSyncService, SshKeyService, TargetService,
 };
-use deploykeys_core::ssh::{quote_shell, run_remote_command};
+use deploykeys_core::ssh::{quote_remote_path, quote_shell, run_remote_command};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::io::Write;
@@ -132,6 +132,7 @@ enum CloneTaskStatus {
 struct CloneTaskDto {
     id: u64,
     repo_id: i64,
+    target_id: i64,
     repo_full_name: String,
     repo_name: String,
     local_path: String,
@@ -154,8 +155,9 @@ impl CloneTaskDto {
 struct PreparedClone {
     task_id: u64,
     clone_url: String,
-    parent_path: PathBuf,
-    local_path: PathBuf,
+    target: Target,
+    parent_path: String,
+    local_path: String,
 }
 
 #[derive(Serialize)]
@@ -936,6 +938,10 @@ async fn clone_repository(
     repo_id: i64,
     title: String,
 ) -> Result<Option<CloneTaskDto>, String> {
+    let target = active_target(&state).await?;
+    if target.target_type != TargetType::Local {
+        return Err("Remote clone must choose a server directory in the app.".to_string());
+    }
     let repo = state
         .db
         .repositories()
@@ -961,7 +967,7 @@ async fn clone_repository(
         ));
     }
 
-    let prepared = prepare_clone_task(&state, &repo, parent).await?;
+    let prepared = prepare_clone_task(&state, &repo, target, path_arg(&parent)).await?;
     let task = new_clone_task(&repo, &prepared);
     push_clone_task(&state.clone_tasks, task.clone());
     persist_clone_tasks(&state.db, &state.clone_tasks).await?;
@@ -973,6 +979,36 @@ async fn clone_repository(
     });
 
     Ok(Some(task))
+}
+
+#[tauri::command]
+async fn clone_repository_to_path(
+    state: State<'_, AppState>,
+    repo_id: i64,
+    parent_path: String,
+) -> Result<CloneTaskDto, String> {
+    let target = active_target(&state).await?;
+    let repo = state
+        .db
+        .repositories()
+        .find_by_id(repo_id)
+        .await
+        .map_err(|e| e.to_string())?
+        .ok_or("Repository not found")?;
+    validate_repo_name(&repo.name)?;
+
+    let prepared = prepare_clone_task(&state, &repo, target, parent_path).await?;
+    let task = new_clone_task(&repo, &prepared);
+    push_clone_task(&state.clone_tasks, task.clone());
+    persist_clone_tasks(&state.db, &state.clone_tasks).await?;
+
+    let db = state.db.clone();
+    let clone_tasks = state.clone_tasks.clone();
+    tokio::spawn(async move {
+        run_git_clone_task(db, clone_tasks, prepared).await;
+    });
+
+    Ok(task)
 }
 
 /// Return persisted clone tasks, newest first.
@@ -1000,9 +1036,15 @@ async fn connect_repository_remote(
     state: State<'_, AppState>,
     repo_id: i64,
 ) -> Result<RepoRemoteResultDto, String> {
+    let target = active_target(&state).await?;
+    if target.target_type != TargetType::Local {
+        return Err(
+            "Repository remote connection currently applies to local clones only.".to_string(),
+        );
+    }
     let repo = find_repository(&state, repo_id).await?;
-    active_local_binding(&state, &repo).await?;
-    let local_path = latest_successful_clone_path(&state, repo_id).await?;
+    active_binding_for_target(&state, &repo, &target).await?;
+    let local_path = latest_successful_clone_path(&state, repo_id, target.id).await?;
     let remote_url = deploy_key_remote_url(&repo);
 
     ensure_git_worktree(&local_path).await?;
@@ -1027,9 +1069,15 @@ async fn test_repository_remote(
     state: State<'_, AppState>,
     repo_id: i64,
 ) -> Result<RepoRemoteResultDto, String> {
+    let target = active_target(&state).await?;
+    if target.target_type != TargetType::Local {
+        return Err(
+            "Repository remote testing currently applies to local clones only.".to_string(),
+        );
+    }
     let repo = find_repository(&state, repo_id).await?;
-    let binding = active_local_binding(&state, &repo).await?;
-    let local_path = latest_successful_clone_path(&state, repo_id).await?;
+    let binding = active_binding_for_target(&state, &repo, &target).await?;
+    let local_path = latest_successful_clone_path(&state, repo_id, target.id).await?;
     let remote_url = deploy_key_remote_url(&repo);
 
     ensure_local_connection_marker(&local_path, repo.id, &remote_url).await?;
@@ -1061,23 +1109,74 @@ async fn test_repository_remote(
 async fn prepare_clone_task(
     state: &AppState,
     repo: &Repository,
-    parent_path: PathBuf,
+    target: Target,
+    parent_path: String,
 ) -> Result<PreparedClone, String> {
-    let local_path = parent_path.join(&repo.name);
-    if tokio::fs::try_exists(&local_path)
-        .await
-        .map_err(|e| e.to_string())?
-    {
-        return Err(format!(
-            "Target directory already exists: {}",
-            local_path.display()
-        ));
+    let binding = active_binding_for_target(state, repo, &target).await?;
+
+    // Refresh the managed SSH config block so an older block (written before
+    // host-key handling was added) is upgraded in place, letting the clone run
+    // non-interactively on a first GitHub connection. Best-effort: if this
+    // fails, the clone may still succeed when the existing block is already
+    // current; otherwise the git failure surfaces the cause either way.
+    if let Ok(service) = KeyBindingService::new(state.db.clone()) {
+        if let Err(e) = service
+            .ensure_ssh_config_for_binding(&target, repo, &binding)
+            .await
+        {
+            tracing::warn!(
+                "Could not refresh SSH config for {} before clone: {}",
+                repo.full_name,
+                e
+            );
+        }
     }
 
-    let clone_url = clone_url_for_repo(state, repo).await?;
+    let parent_path = parent_path.trim().to_string();
+    if parent_path.is_empty() {
+        return Err("Clone directory is required".to_string());
+    }
+
+    let local_path = match target.target_type {
+        TargetType::Local => {
+            let parent = PathBuf::from(&parent_path);
+            let local_path = parent.join(&repo.name);
+            if tokio::fs::try_exists(&local_path)
+                .await
+                .map_err(|e| e.to_string())?
+            {
+                return Err(format!(
+                    "Target directory already exists: {}",
+                    local_path.display()
+                ));
+            }
+            path_arg(&local_path)
+        }
+        TargetType::Remote => {
+            let parent = parent_path.trim_end_matches('/');
+            let parent = if parent.is_empty() { "/" } else { parent };
+            let local_path = if parent == "/" {
+                format!("/{}", repo.name)
+            } else {
+                format!("{parent}/{}", repo.name)
+            };
+            let command = format!(
+                "set -eu; mkdir -p {parent}; test -d {parent}; test ! -e {local_path}",
+                parent = quote_remote_path(parent),
+                local_path = quote_remote_path(&local_path),
+            );
+            run_remote_command(&target, &command)
+                .await
+                .map_err(|e| e.to_string())?;
+            local_path
+        }
+    };
+
+    let clone_url = clone_url_for_repo(repo);
     Ok(PreparedClone {
         task_id: state.next_clone_task_id.fetch_add(1, Ordering::Relaxed),
         clone_url,
+        target,
         parent_path,
         local_path,
     })
@@ -1253,7 +1352,20 @@ async fn resolve_token(state: &AppState, account: &Account) -> Result<String, St
     Ok(token)
 }
 
-async fn clone_url_for_repo(state: &AppState, repo: &Repository) -> Result<String, String> {
+fn clone_url_for_repo(repo: &Repository) -> String {
+    format!(
+        "git@{}:{}/{}.git",
+        repo_ssh_host_alias(repo),
+        repo.owner,
+        repo.name
+    )
+}
+
+async fn active_binding_for_target(
+    state: &AppState,
+    repo: &Repository,
+    target: &Target,
+) -> Result<KeyBinding, String> {
     let bindings = state
         .db
         .key_bindings()
@@ -1261,24 +1373,65 @@ async fn clone_url_for_repo(state: &AppState, repo: &Repository) -> Result<Strin
         .await
         .map_err(|e| e.to_string())?;
 
+    let mut inactive_binding = None::<KeyBindingStatus>;
+    let mut missing_private_key = None::<String>;
+    let mut has_current_target_binding = false;
+
     for binding in bindings {
-        if binding.status != KeyBindingStatus::Active {
+        if binding.target_id != target.id {
             continue;
         }
-        if tokio::fs::try_exists(&binding.private_key_path)
-            .await
-            .unwrap_or(false)
-        {
-            return Ok(format!(
-                "git@{}:{}/{}.git",
-                repo_ssh_host_alias(repo),
-                repo.owner,
-                repo.name
-            ));
+        has_current_target_binding = true;
+        if binding.status != KeyBindingStatus::Active {
+            inactive_binding.get_or_insert(binding.status);
+            continue;
         }
+        if target_private_key_exists_for_app(target, &binding.private_key_path).await? {
+            return Ok(binding);
+        }
+        missing_private_key.get_or_insert(binding.private_key_path);
     }
 
-    Ok(repo.ssh_url.clone())
+    if let Some(path) = missing_private_key {
+        return Err(format!(
+            "Active deploy key for {} exists on the current connection, but its private key file is missing: {}",
+            repo.full_name, path,
+        ));
+    }
+
+    if let Some(status) = inactive_binding {
+        return Err(format!(
+            "Deploy key binding for {} on the current connection is {}. Rebind or verify the key before cloning.",
+            repo.full_name, status,
+        ));
+    }
+
+    if has_current_target_binding {
+        return Err(format!(
+            "No usable deploy key for {} on the current connection. Rebind a key for this connection first.",
+            repo.full_name,
+        ));
+    }
+
+    Err(format!(
+        "No active deploy key for {} on the current connection. Bind a key for this connection first.",
+        repo.full_name,
+    ))
+}
+
+async fn target_private_key_exists_for_app(
+    target: &Target,
+    private_key_path: &str,
+) -> Result<bool, String> {
+    match target.target_type {
+        TargetType::Local => Ok(tokio::fs::try_exists(private_key_path)
+            .await
+            .unwrap_or(false)),
+        TargetType::Remote => {
+            let command = format!("test -f {}", quote_remote_path(private_key_path));
+            Ok(run_remote_command(target, &command).await.is_ok())
+        }
+    }
 }
 
 async fn find_repository(state: &AppState, repo_id: i64) -> Result<Repository, String> {
@@ -1291,33 +1444,11 @@ async fn find_repository(state: &AppState, repo_id: i64) -> Result<Repository, S
         .ok_or_else(|| "Repository not found".to_string())
 }
 
-async fn active_local_binding(state: &AppState, repo: &Repository) -> Result<KeyBinding, String> {
-    let bindings = state
-        .db
-        .key_bindings()
-        .list_by_repo(repo.id)
-        .await
-        .map_err(|e| e.to_string())?;
-
-    for binding in bindings {
-        if binding.status != KeyBindingStatus::Active {
-            continue;
-        }
-        if tokio::fs::try_exists(&binding.private_key_path)
-            .await
-            .unwrap_or(false)
-        {
-            return Ok(binding);
-        }
-    }
-
-    Err(format!(
-        "No active local deploy key is available for {}.",
-        repo.full_name
-    ))
-}
-
-async fn latest_successful_clone_path(state: &AppState, repo_id: i64) -> Result<PathBuf, String> {
+async fn latest_successful_clone_path(
+    state: &AppState,
+    repo_id: i64,
+    target_id: i64,
+) -> Result<PathBuf, String> {
     if let Some(path) = latest_persisted_clone_path(&state.db, repo_id).await? {
         if tokio::fs::try_exists(&path).await.unwrap_or(false) {
             return Ok(path);
@@ -1327,10 +1458,11 @@ async fn latest_successful_clone_path(state: &AppState, repo_id: i64) -> Result<
     let tasks = snapshot_clone_tasks(&state.clone_tasks);
     let mut latest_missing_path = None::<PathBuf>;
 
-    for task in tasks
-        .into_iter()
-        .filter(|task| task.repo_id == repo_id && task.status == CloneTaskStatus::Succeeded)
-    {
+    for task in tasks.into_iter().filter(|task| {
+        task.repo_id == repo_id
+            && task.target_id == target_id
+            && task.status == CloneTaskStatus::Succeeded
+    }) {
         let path = PathBuf::from(&task.local_path);
         if tokio::fs::try_exists(&path).await.unwrap_or(false) {
             return Ok(path);
@@ -1660,12 +1792,17 @@ async fn run_git_clone_task(
     clone_tasks: Arc<Mutex<Vec<CloneTaskDto>>>,
     prepared: PreparedClone,
 ) {
+    if prepared.target.target_type == TargetType::Remote {
+        run_remote_git_clone_task(db, clone_tasks, prepared).await;
+        return;
+    }
+
     let mut command = tokio::process::Command::new(git_program());
     command
         .arg("clone")
         .arg("--progress")
         .arg(&prepared.clone_url)
-        .current_dir(&prepared.parent_path)
+        .current_dir(PathBuf::from(&prepared.parent_path))
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
 
@@ -1742,6 +1879,46 @@ async fn run_git_clone_task(
                 CloneTaskStatus::Failed,
                 None,
                 Some(format!("Failed while waiting for git clone: {e}")),
+            )
+            .await;
+        }
+    }
+}
+
+async fn run_remote_git_clone_task(
+    db: Database,
+    clone_tasks: Arc<Mutex<Vec<CloneTaskDto>>>,
+    prepared: PreparedClone,
+) {
+    let command = format!(
+        "set -eu; cd {parent}; git clone --progress {clone_url}",
+        parent = quote_remote_path(&prepared.parent_path),
+        clone_url = quote_shell(&prepared.clone_url),
+    );
+    match run_remote_command(&prepared.target, &command).await {
+        Ok(output) => {
+            let log = filtered_clone_log_chunk(&format!("{}{}", output.stdout, output.stderr));
+            if !log.is_empty() {
+                append_clone_log(&db, &clone_tasks, prepared.task_id, &log).await;
+            }
+            finish_clone_task(
+                &db,
+                &clone_tasks,
+                prepared.task_id,
+                CloneTaskStatus::Succeeded,
+                Some(output.exit_code),
+                None,
+            )
+            .await;
+        }
+        Err(e) => {
+            finish_clone_task(
+                &db,
+                &clone_tasks,
+                prepared.task_id,
+                CloneTaskStatus::Failed,
+                None,
+                Some(e.to_string()),
             )
             .await;
         }
@@ -1825,9 +2002,13 @@ fn new_clone_task(repo: &Repository, prepared: &PreparedClone) -> CloneTaskDto {
     CloneTaskDto {
         id: prepared.task_id,
         repo_id: repo.id,
+        target_id: prepared.target.id,
         repo_full_name: repo.full_name.clone(),
         repo_name: repo.name.clone(),
-        local_path: prepared.local_path.to_string_lossy().to_string(),
+        local_path: match prepared.target.target_type {
+            TargetType::Local => prepared.local_path.clone(),
+            TargetType::Remote => format!("{}: {}", prepared.target.alias, prepared.local_path),
+        },
         command: command.clone(),
         status: CloneTaskStatus::Running,
         log: String::new(),
@@ -1891,7 +2072,10 @@ async fn finish_clone_task(
         tasks.clone()
     };
     if should_persist_clone_path {
-        if let Some(task) = snapshot.iter().find(|task| task.id == task_id) {
+        if let Some(task) = snapshot
+            .iter()
+            .find(|task| task.id == task_id && !task.local_path.contains(": "))
+        {
             if let Err(e) = persist_repo_clone_path(db, task.repo_id, &task.local_path).await {
                 tracing::warn!("Could not persist repository clone path: {}", e);
             }
@@ -2083,6 +2267,7 @@ pub fn run() {
             ssh_key_files_exist,
             bind_deploy_key,
             clone_repository,
+            clone_repository_to_path,
             list_clone_tasks,
             clear_clone_tasks,
             connect_repository_remote,

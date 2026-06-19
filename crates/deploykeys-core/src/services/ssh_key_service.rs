@@ -224,20 +224,33 @@ impl SshKeyService {
         let key_dir = dirname_remote_path(&private_key_path)
             .ok_or_else(|| Error::Validation("Remote private key path has no directory".into()))?;
         let keygen_args = remote_keygen_args(&algorithm, &comment, &private_key_path);
+        let exists_message = format!("SSH key directory already exists: {key_dir}");
         let command = format!(
             "set -eu; \
-             mkdir -p {base} {key_dir}; \
-             chmod 700 {base} {key_dir}; \
-             test ! -e {private_key} && test ! -e {public_key}; \
-             ssh-keygen -q {keygen_args}; \
-             chmod 600 {private_key}; \
-             chmod 644 {public_key}; \
-             printf '%s\\n' \"$(cat {public_key})\"; \
-             ssh-keygen -l -E sha256 -f {public_key} | awk '{{print $2}}'",
+             base={base}; \
+             key_dir={key_dir}; \
+             private_key={private_key}; \
+             public_key={public_key}; \
+             created_dir=0; \
+             cleanup() {{ if [ \"$created_dir\" = 1 ]; then rm -rf -- \"$key_dir\"; fi; }}; \
+             trap cleanup EXIT; \
+             mkdir -p -- \"$base\"; \
+             if ! mkdir -- \"$key_dir\"; then printf '%s\\n' {exists_message} >&2; exit 73; fi; \
+             created_dir=1; \
+             chmod 700 -- \"$base\" \"$key_dir\"; \
+             test ! -e \"$private_key\" && test ! -e \"$public_key\"; \
+             ssh-keygen -q {keygen_args} < /dev/null; \
+             chmod 600 -- \"$private_key\"; \
+             chmod 644 -- \"$public_key\"; \
+             printf '%s\\n' \"$(cat \"$public_key\")\"; \
+             ssh-keygen -l -E sha256 -f \"$public_key\" | awk '{{print $2}}'; \
+             created_dir=0; \
+             trap - EXIT",
             base = quote_remote_path(&target.key_base_dir),
             key_dir = quote_remote_path(&key_dir),
             private_key = quote_remote_path(&private_key_path),
             public_key = quote_remote_path(&public_key_path),
+            exists_message = quote_shell(&exists_message),
         );
         let output = run_remote_command(target, &command).await?;
         let mut lines = output.stdout.lines().filter(|line| !line.trim().is_empty());

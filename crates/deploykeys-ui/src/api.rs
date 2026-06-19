@@ -390,6 +390,7 @@ pub async fn bind_deploy_key(repo_id: i64, ssh_key_id: i64, writable: bool) -> R
 pub struct CloneTask {
     pub id: u64,
     pub repo_id: i64,
+    pub target_id: i64,
     pub repo_full_name: String,
     pub repo_name: String,
     pub local_path: String,
@@ -413,6 +414,26 @@ pub async fn clone_repository(repo_id: i64, title: String) -> Result<Option<Clon
         title: String,
     }
     invoke("clone_repository", &Args { repo_id, title }).await
+}
+
+pub async fn clone_repository_to_path(
+    repo_id: i64,
+    parent_path: String,
+) -> Result<CloneTask, String> {
+    #[derive(Serialize)]
+    #[serde(rename_all = "camelCase")]
+    struct Args {
+        repo_id: i64,
+        parent_path: String,
+    }
+    invoke(
+        "clone_repository_to_path",
+        &Args {
+            repo_id,
+            parent_path,
+        },
+    )
+    .await
 }
 
 /// Return persisted clone tasks, newest first.

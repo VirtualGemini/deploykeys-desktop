@@ -7,7 +7,7 @@
 //! signed-out "Refresh" routes to the sign-in screen instead of erroring.
 
 use crate::api::{self, Repo, SshKey};
-use crate::connection::connection_state;
+use crate::connection::{connection_state, ConnectionKind};
 use crate::i18n::t;
 use crate::icons::{Icon, IconName};
 use crate::page_size::page_size;
@@ -70,6 +70,7 @@ pub fn Repos(
     let bind_submitting = RwSignal::new(false);
     let bind_selected_key = RwSignal::new(None::<i64>);
     let bind_writable = RwSignal::new(false);
+    let remote_clone_repo = RwSignal::new(None::<Repo>);
 
     let query = RwSignal::new(String::new());
     // String filter values: "" = all; for language, OTHER = repos with no language.
@@ -159,6 +160,20 @@ pub fn Repos(
 
     let clone_repo = move |repo: Repo| {
         if clone_picker_running.get_untracked().is_some() {
+            return;
+        }
+        let active_is_remote = conn
+            .connected_id
+            .get_untracked()
+            .and_then(|id| {
+                conn.connections
+                    .get_untracked()
+                    .into_iter()
+                    .find(|connection| connection.id == id)
+            })
+            .is_some_and(|connection| connection.kind == ConnectionKind::Remote);
+        if active_is_remote {
+            remote_clone_repo.set(Some(repo));
             return;
         }
         clone_picker_running.set(Some(repo.id));
@@ -664,6 +679,13 @@ pub fn Repos(
                     });
                 })
             />
+            <RemoteCloneDialog
+                repo=remote_clone_repo
+                running=clone_picker_running
+                tasks=clone_tasks
+                selected_task_id=clone_expanded_task_id
+                list_open=clone_list_open
+            />
             <RepoMoreActionsDropdown
                 menu=more_repo_open
                 running=remote_action_running
@@ -863,6 +885,137 @@ fn clone_range_options() -> Vec<(String, String)> {
     .into_iter()
     .map(|(value, key)| (value.to_string(), t(key).to_string()))
     .collect()
+}
+
+const DEFAULT_REMOTE_CLONE_DIR: &str = "~/apps";
+
+#[component]
+fn RemoteCloneDialog(
+    repo: RwSignal<Option<Repo>>,
+    running: RwSignal<Option<i64>>,
+    tasks: RwSignal<Vec<api::CloneTask>>,
+    selected_task_id: RwSignal<Option<u64>>,
+    list_open: RwSignal<bool>,
+) -> impl IntoView {
+    let progress = ProgressHandle::expect();
+    let toast = ToastHandle::expect();
+    let visible_repo = RwSignal::new(None::<Repo>);
+    let dialog_open = RwSignal::new(false);
+    let input = RwSignal::new(DEFAULT_REMOTE_CLONE_DIR.to_string());
+
+    create_effect(move |_| {
+        if let Some(next_repo) = repo.get() {
+            visible_repo.set(Some(next_repo));
+            input.set(DEFAULT_REMOTE_CLONE_DIR.to_string());
+            dialog_open.set(false);
+            set_timeout(move || dialog_open.set(true), Duration::from_millis(16));
+        } else if visible_repo.with_untracked(Option::is_some) {
+            dialog_open.set(false);
+            set_timeout(
+                move || {
+                    if repo.get_untracked().is_none() {
+                        visible_repo.set(None);
+                    }
+                },
+                Duration::from_millis(220),
+            );
+        }
+    });
+
+    let submit = move |_| {
+        if running.get_untracked().is_some() {
+            return;
+        }
+        let Some(repo_value) = repo.get_untracked() else {
+            return;
+        };
+        let path = input.get_untracked().trim().to_string();
+        if path.is_empty() {
+            toast.error(t("repos.remote_clone_path_required"));
+            return;
+        }
+        running.set(Some(repo_value.id));
+        let sim = progress.begin_simulated();
+        spawn_local(async move {
+            match api::clone_repository_to_path(repo_value.id, path).await {
+                Ok(task) => {
+                    let task_id = task.id;
+                    upsert_clone_task(tasks, task);
+                    selected_task_id.set(Some(task_id));
+                    list_open.set(true);
+                    repo.set(None);
+                }
+                Err(e) => toast.error(e),
+            }
+            running.set(None);
+            progress.end_simulated(&sim);
+        });
+    };
+
+    view! {
+        <Show when=move || visible_repo.get().is_some()>
+            <div
+                class=move || {
+                    if dialog_open.get() {
+                        "fixed inset-0 z-[100] bg-black/50 backdrop-blur-sm flex items-center justify-center px-4 opacity-100 transition-opacity duration-200"
+                    } else {
+                        "fixed inset-0 z-[100] bg-black/50 backdrop-blur-sm flex items-center justify-center px-4 opacity-0 pointer-events-none transition-opacity duration-200"
+                    }
+                }
+                on:click=move |_| repo.set(None)
+            >
+                <div
+                    class=move || {
+                        if dialog_open.get() {
+                            "w-full max-w-lg bg-surface border border-border rounded-xl shadow-2xl overflow-hidden scale-100 transition-transform duration-200"
+                        } else {
+                            "w-full max-w-lg bg-surface border border-border rounded-xl shadow-2xl overflow-hidden scale-95 transition-transform duration-200"
+                        }
+                    }
+                    on:click=|ev| ev.stop_propagation()
+                >
+                    <div class="px-6 py-5 border-b border-border">
+                        <h2 class="text-base font-semibold text-content">{move || t("repos.remote_clone_title")}</h2>
+                        <p class="mt-1 text-sm text-muted truncate">
+                            {move || visible_repo.get().map(|repo| repo.full_name).unwrap_or_default()}
+                        </p>
+                    </div>
+                    <div class="px-6 py-5 space-y-4">
+                        <div>
+                            <label class="block text-sm font-medium text-content mb-1.5">
+                                {move || t("repos.remote_clone_directory")}
+                            </label>
+                            <input
+                                type="text"
+                                class="w-full py-2 px-3 text-sm rounded-lg border border-border bg-bg text-content placeholder:text-muted focus:outline-none focus:ring-1 focus:ring-primary font-mono"
+                                prop:value=move || input.get()
+                                on:input=move |ev| input.set(event_target_value(&ev))
+                                prop:disabled=move || running.get().is_some()
+                            />
+                        </div>
+                    </div>
+                    <div class="flex justify-end gap-2 px-6 py-4 border-t border-border">
+                        <button
+                            type="button"
+                            class="px-4 py-2 text-sm font-medium rounded-lg bg-bg text-content hover:text-primary focus:outline-none disabled:opacity-50"
+                            on:click=move |_| repo.set(None)
+                            prop:disabled=move || running.get().is_some()
+                        >
+                            {move || t("common.cancel")}
+                        </button>
+                        <button
+                            type="button"
+                            class="px-4 py-2 text-sm font-medium rounded-lg bg-primary text-on-primary hover:bg-primary-hover focus:outline-none disabled:opacity-50"
+                            on:click=submit
+                            prop:disabled=move || input.get().trim().is_empty() || running.get().is_some()
+                        >
+                            {move || t("repos.clone_repository")}
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </Show>
+    }
 }
 
 #[component]

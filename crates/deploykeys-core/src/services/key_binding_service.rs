@@ -4,8 +4,8 @@ use crate::{
     github::{CreateDeployKeyRequest, GitHubClient},
     keygen::local::LocalKeyGenerator,
     models::{
-        DeployKeyPermission, KeyAlgorithm, KeyBinding, KeyBindingStatus, KeyResidency, Target,
-        TargetType,
+        DeployKeyPermission, KeyAlgorithm, KeyBinding, KeyBindingStatus, KeyResidency, Repository,
+        Target, TargetType,
     },
     ssh::{dirname_remote_path, quote_remote_path, quote_shell, run_remote_command},
     Error, Result,
@@ -30,6 +30,15 @@ impl KeyBindingService {
     /// Inject a preconfigured client (tests, GitHub Enterprise).
     pub fn with_github_client(db: Database, github: GitHubClient) -> Self {
         Self { db, github }
+    }
+
+    pub async fn ensure_ssh_config_for_binding(
+        &self,
+        target: &Target,
+        repo: &Repository,
+        binding: &KeyBinding,
+    ) -> Result<()> {
+        ensure_repo_ssh_config(target, repo, binding).await
     }
 
     /// Generate a key pair, upload the public key as a GitHub deploy key, and
@@ -477,6 +486,8 @@ async fn ensure_repo_ssh_config(
              User git\n\
             IdentityFile {identity_file}\n\
              IdentitiesOnly yes\n\
+             HostKeyAlias github.com\n\
+             StrictHostKeyChecking accept-new\n\
          {end}\n",
         full_name = repo.full_name,
         identity_file = quote_ssh_config_value(&binding.private_key_path),
@@ -511,6 +522,8 @@ async fn ensure_remote_repo_ssh_config(
              User git\n\
              IdentityFile {identity_file}\n\
              IdentitiesOnly yes\n\
+             HostKeyAlias github.com\n\
+             StrictHostKeyChecking accept-new\n\
          {end}\n",
         full_name = repo.full_name,
         identity_file = quote_ssh_config_value(&binding.private_key_path),
