@@ -11,12 +11,15 @@ env:
   # sqlx compile-time macros validate queries against this database.
   DATABASE_URL: sqlite:deploykeys.db
 
+permissions:
+  contents: read
+
 jobs:
   lint:
     name: Format + Clippy
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
@@ -53,7 +56,7 @@ jobs:
       matrix:
         os: [ubuntu-latest, macos-latest]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - name: Install GUI system dependencies (Linux)
@@ -83,11 +86,14 @@ jobs:
   audit:
     name: Security Audit
     runs-on: ubuntu-latest
-    # Advisory-only: new CVEs in transitive deps should not block PRs until
-    # a triage process exists. Tighten once the project stabilizes.
-    continue-on-error: true
     steps:
-      - uses: actions/checkout@v4
-      - uses: rustsec/audit-check@v2
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
+      - uses: actions/checkout@v5
+      - name: Install cargo-audit
+        run: |
+          rustup toolchain install stable --profile minimal
+          cargo +stable install cargo-audit --locked --version 0.22.2
+      # Advisory-only: new CVEs in transitive deps should not block PRs until
+      # a triage process exists. Tighten once the project stabilizes.
+      - name: Run cargo audit
+        continue-on-error: true
+        run: cargo +stable audit --color always

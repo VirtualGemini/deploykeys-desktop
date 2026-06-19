@@ -14,6 +14,7 @@ use crate::i18n::t;
 use crate::icons::{Icon, IconName};
 use crate::page_size::page_size;
 use crate::screens::keys::{FilterDropdown, PaginationBar};
+use crate::toast::ToastHandle;
 use leptos::*;
 use wasm_bindgen::JsCast;
 use wasm_bindgen_futures::spawn_local;
@@ -296,10 +297,14 @@ fn ConnectionRow(conn: Connection) -> impl IntoView {
     let toggle = {
         let id = id.clone();
         move |_| {
+            let toast = ToastHandle::expect();
+            let name = t(name_key);
             if state.is_connected(&id) {
                 state.disconnect(&id);
+                toast.success(t("connect.disconnect_success").replace("{}", name));
             } else {
                 state.connect(&id);
+                toast.success(t("connect.connect_success").replace("{}", name));
             }
         }
     };

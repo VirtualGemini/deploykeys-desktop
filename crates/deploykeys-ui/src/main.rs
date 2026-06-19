@@ -8,6 +8,7 @@ mod progress;
 mod screens;
 mod tauri;
 mod theme;
+mod toast;
 
 use app::App;
 use leptos::*;

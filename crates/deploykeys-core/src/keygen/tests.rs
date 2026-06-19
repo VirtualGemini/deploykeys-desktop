@@ -65,7 +65,6 @@ fn ecdsa_p521_generation_uses_correct_key_type() {
 }
 
 #[test]
-#[ignore = "RSA key generation is slow in debug builds; run with --ignored"]
 fn rsa2048_generation_respects_bit_size() {
     let temp_dir = TempDir::new().unwrap();
     let key_path = temp_dir.path().join("id_rsa");
@@ -73,10 +72,20 @@ fn rsa2048_generation_respects_bit_size() {
     let key_pair =
         LocalKeyGenerator::generate(KeyAlgorithm::Rsa2048, &key_path, "test@example.com").unwrap();
 
-    let public = ssh_key::PublicKey::from_openssh(&key_pair.public_key).unwrap();
-    let rsa = public.key_data().rsa().expect("expected an RSA key");
-    let n_bytes = rsa.n.as_positive_bytes().unwrap_or(rsa.n.as_bytes());
-    assert_eq!(n_bytes.len() * 8, 2048, "selected bit size must be honored");
+    assert!(key_pair.public_key.starts_with("ssh-rsa "));
+    assert!(key_pair.fingerprint.starts_with("SHA256:"));
+
+    let output = std::process::Command::new("ssh-keygen")
+        .arg("-l")
+        .arg("-f")
+        .arg(key_path.with_extension("pub"))
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    let bits = stdout.split_whitespace().next().unwrap();
+    assert_eq!(bits, "2048", "selected bit size must be honored");
 }
 
 #[test]

@@ -1,0 +1,6 @@
+[advisories]
+# cargo-audit reports RUSTSEC-2023-0071 because Cargo.lock retains `rsa` as
+# optional dependency metadata for crates such as `ssh-key`/`sqlx-mysql`.
+# `cargo tree --workspace --edges normal --invert rsa` confirms it is not in
+# the normal build graph, and RSA key generation is delegated to `ssh-keygen`.
+ignore = ["RUSTSEC-2023-0071"]

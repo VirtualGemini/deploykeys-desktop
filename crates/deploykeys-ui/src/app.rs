@@ -13,6 +13,7 @@ use crate::screens::repos::Repos;
 use crate::screens::signin::SignIn;
 use crate::tauri;
 use crate::theme::{self, Theme};
+use crate::toast::{ToastHandle, ToastViewport};
 use leptos::*;
 use wasm_bindgen_futures::spawn_local;
 
@@ -89,6 +90,8 @@ pub fn App() -> impl IntoView {
     let progress = ProgressHandle::new();
     progress.provide();
     let progress_for_listener = progress;
+    let toast = ToastHandle::new();
+    toast.provide();
     let error = RwSignal::new(None::<String>);
     let account = RwSignal::new(None::<api::Account>);
     let current_section = RwSignal::new(AppSection::Repos);
@@ -167,6 +170,7 @@ pub fn App() -> impl IntoView {
                 Ok(acct) => {
                     account.set(Some(acct));
                     screen.set(Screen::Main);
+                    toast.success(t("signin.success"));
                 }
                 Err(e) => error.set(Some(e)),
             }
@@ -233,6 +237,7 @@ pub fn App() -> impl IntoView {
                 </div>
             }.into_view(),
         }}
+        <ToastViewport />
     }
 }
 
@@ -293,9 +298,11 @@ fn Main(
         // Without the backend call the account row + keyring token survive, so
         // the session would reappear on the next launch.
         let sim = progress.begin_simulated();
+        let toast = ToastHandle::expect();
         spawn_local(async move {
             let _ = api::sign_out().await;
             account.set(None);
+            toast.success(t("sign_out.success"));
             progress.end_simulated(&sim);
         });
     };
@@ -834,8 +841,10 @@ fn CommandPalette(
                     locale.set(next);
                     let code = next.code();
                     let sim = progress.begin_simulated();
+                    let toast = ToastHandle::expect();
                     spawn_local(async move {
                         let _ = api::set_language(code).await;
+                        toast.success(t("settings.language_changed"));
                         progress.end_simulated(&sim);
                     });
                     open.set(false);
@@ -1166,8 +1175,10 @@ fn LanguageToggle(
         open.set(false);
         let code = next.code();
         let sim = progress.begin_simulated();
+        let toast = ToastHandle::expect();
         spawn_local(async move {
             let _ = api::set_language(code).await;
+            toast.success(t("settings.language_changed"));
             progress.end_simulated(&sim);
         });
     };

@@ -13,6 +13,7 @@ use crate::icons::{Icon, IconName};
 use crate::page_size::page_size;
 use crate::progress::ProgressHandle;
 use crate::screens::keys::FormSelectDropdown;
+use crate::toast::ToastHandle;
 use leptos::*;
 use std::time::Duration;
 use wasm_bindgen::JsCast;
@@ -36,12 +37,6 @@ enum RepoRemoteAction {
 }
 
 #[derive(Clone, Copy)]
-enum ToastTone {
-    Error,
-    Success,
-}
-
-#[derive(Clone, Copy)]
 struct MoreMenuState {
     repo_id: i64,
     top: f64,
@@ -55,6 +50,7 @@ pub fn Repos(
     on_sign_in_hint: Callback<()>,
 ) -> impl IntoView {
     let progress = ProgressHandle::expect();
+    let toast = ToastHandle::expect();
     let conn = connection_state();
     let has_connection = Signal::derive(move || conn.has_active());
     let table_scroll_ref = NodeRef::<html::Div>::new();
@@ -62,8 +58,6 @@ pub fn Repos(
     let repos = RwSignal::new(Vec::<Repo>::new());
     let loading = RwSignal::new(false);
     let syncing = RwSignal::new(false);
-    let error = RwSignal::new(None::<String>);
-    let notice = RwSignal::new(None::<String>);
     let clone_picker_running = RwSignal::new(None::<i64>);
     let clone_tasks = RwSignal::new(Vec::<api::CloneTask>::new());
     let clone_list_open = RwSignal::new(false);
@@ -74,7 +68,6 @@ pub fn Repos(
     let bind_keys = RwSignal::new(Vec::<SshKey>::new());
     let bind_keys_loading = RwSignal::new(false);
     let bind_submitting = RwSignal::new(false);
-    let bind_error = RwSignal::new(None::<String>);
     let bind_selected_key = RwSignal::new(None::<i64>);
     let bind_writable = RwSignal::new(false);
 
@@ -92,7 +85,6 @@ pub fn Repos(
     create_effect(move |_| {
         if account.get().is_none() {
             repos.set(Vec::new());
-            error.set(None);
             loading.set(false);
             return;
         }
@@ -113,7 +105,7 @@ pub fn Repos(
                     }
                     syncing.set(false);
                 }
-                Err(e) => error.set(Some(e)),
+                Err(e) => toast.error(e),
             }
             loading.set(false);
             progress.end_simulated(&sim);
@@ -132,11 +124,10 @@ pub fn Repos(
         }
         syncing.set(true);
         let sim = progress.begin_simulated();
-        error.set(None);
-        notice.set(None);
         spawn_local(async move {
-            if let Err(e) = api::sync_repositories().await {
-                error.set(Some(e));
+            match api::sync_repositories().await {
+                Ok(_) => toast.success(t("repos.sync_success")),
+                Err(e) => toast.error(e),
             }
             if let Ok(list) = api::list_repositories().await {
                 repos.set(list);
@@ -166,40 +157,11 @@ pub fn Repos(
         on_cleanup(move || interval.clear());
     }
 
-    // Auto-dismiss toasts; the guard avoids clearing a newer message that replaced
-    // this one within the window. Both stay dismissable via their close button.
-    create_effect(move |_| {
-        if let Some(message) = error.get() {
-            set_timeout(
-                move || {
-                    if error.get_untracked().as_deref() == Some(message.as_str()) {
-                        error.set(None);
-                    }
-                },
-                Duration::from_secs(6),
-            );
-        }
-    });
-    create_effect(move |_| {
-        if let Some(message) = notice.get() {
-            set_timeout(
-                move || {
-                    if notice.get_untracked().as_deref() == Some(message.as_str()) {
-                        notice.set(None);
-                    }
-                },
-                Duration::from_secs(4),
-            );
-        }
-    });
-
     let clone_repo = move |repo: Repo| {
         if clone_picker_running.get_untracked().is_some() {
             return;
         }
         clone_picker_running.set(Some(repo.id));
-        error.set(None);
-        notice.set(None);
         let dialog_title = t("repos.clone_dialog_title").replace("{}", &repo.full_name);
         spawn_local(async move {
             match api::clone_repository(repo.id, dialog_title).await {
@@ -210,7 +172,7 @@ pub fn Repos(
                     clone_list_open.set(true);
                 }
                 Ok(None) => {}
-                Err(e) => error.set(Some(e)),
+                Err(e) => toast.error(e),
             }
             clone_picker_running.set(None);
         });
@@ -334,8 +296,6 @@ pub fn Repos(
         bind_keys.set(Vec::new());
         bind_selected_key.set(None);
         bind_writable.set(false);
-        bind_error.set(None);
-        notice.set(None);
         bind_keys_loading.set(true);
         let sim = progress.begin_simulated();
         spawn_local(async move {
@@ -344,7 +304,7 @@ pub fn Repos(
                     bind_selected_key.set(list.first().map(|key| key.id));
                     bind_keys.set(list);
                 }
-                Err(e) => bind_error.set(Some(e)),
+                Err(e) => toast.error(e),
             }
             bind_keys_loading.set(false);
             progress.end_simulated(&sim);
@@ -358,13 +318,11 @@ pub fn Repos(
             return;
         };
         let Some(ssh_key_id) = bind_selected_key.get_untracked() else {
-            bind_error.set(Some(t("repos.bind_key_required").to_string()));
+            toast.error(t("repos.bind_key_required"));
             return;
         };
 
         bind_submitting.set(true);
-        bind_error.set(None);
-        notice.set(None);
         let writable = bind_writable.get_untracked();
         let success = t("repos.bind_success").to_string();
         let sim = progress.begin_simulated();
@@ -372,9 +330,9 @@ pub fn Repos(
             match api::bind_deploy_key(repo.id, ssh_key_id, writable).await {
                 Ok(()) => {
                     bind_repo.set(None);
-                    notice.set(Some(success));
+                    toast.success(success);
                 }
-                Err(e) => bind_error.set(Some(e)),
+                Err(e) => toast.error(e),
             }
             bind_submitting.set(false);
             progress.end_simulated(&sim);
@@ -386,14 +344,12 @@ pub fn Repos(
         }
         more_repo_open.set(None);
         remote_action_running.set(Some((repo_id, RepoRemoteAction::Connect)));
-        error.set(None);
-        notice.set(None);
         let success = t("repos.connect_success").to_string();
         let sim = progress.begin_simulated();
         spawn_local(async move {
             match api::connect_repository_remote(repo_id).await {
-                Ok(_) => notice.set(Some(success)),
-                Err(e) => error.set(Some(e)),
+                Ok(_) => toast.success(success),
+                Err(e) => toast.error(e),
             }
             remote_action_running.set(None);
             progress.end_simulated(&sim);
@@ -405,14 +361,12 @@ pub fn Repos(
         }
         more_repo_open.set(None);
         remote_action_running.set(Some((repo_id, RepoRemoteAction::Test)));
-        error.set(None);
-        notice.set(None);
         let success = t("repos.test_success").to_string();
         let sim = progress.begin_simulated();
         spawn_local(async move {
             match api::test_repository_remote(repo_id).await {
-                Ok(_) => notice.set(Some(success)),
-                Err(e) => error.set(Some(e)),
+                Ok(_) => toast.success(success),
+                Err(e) => toast.error(e),
             }
             remote_action_running.set(None);
             progress.end_simulated(&sim);
@@ -428,14 +382,7 @@ pub fn Repos(
                         type="button"
                         title=move || t("repos.clone_tasks")
                         aria-label=move || t("repos.clone_tasks")
-                        class=move || {
-                            let base = "relative inline-flex size-9 items-center justify-center overflow-visible rounded-lg border border-border bg-surface text-content hover:bg-bg hover:text-primary focus:outline-none";
-                            if running_clone_count.get() > 0 {
-                                format!("{base} clone-activity-scan")
-                            } else {
-                                base.to_string()
-                            }
-                        }
+                        class="relative inline-flex size-9 items-center justify-center overflow-visible rounded-lg border border-border bg-surface text-content hover:bg-bg hover:text-primary focus:outline-none"
                         on:click=move |_| clone_list_open.set(true)
                     >
                         <Icon name=IconName::Download class="size-4" />
@@ -486,12 +433,6 @@ pub fn Repos(
                         fixed_height=true
                         on_select=Callback::new(set_language)
                     />
-                </div>
-
-                // Floating toast popups (error / success), bottom-right, above dialogs.
-                <div class="pointer-events-none fixed bottom-4 right-4 z-[120] flex flex-col items-end gap-2">
-                    <ToastPopup message=error tone=ToastTone::Error />
-                    <ToastPopup message=notice tone=ToastTone::Success />
                 </div>
 
                 <Show
@@ -636,7 +577,7 @@ pub fn Repos(
                                                                                 class=move || {
                                                                                     let base = "relative inline-flex items-center justify-center size-8 overflow-hidden rounded-md text-primary hover:bg-primary-soft focus:outline-none disabled:pointer-events-none";
                                                                                     if clone_picker_running.get() == Some(repo_id) {
-                                                                                        format!("{base} clone-activity-scan")
+                                                                                        base.to_string()
                                                                                     } else if clone_picker_running.get().is_some() || !has_connection.get() {
                                                                                         format!("{base} opacity-50")
                                                                                     } else {
@@ -706,7 +647,6 @@ pub fn Repos(
                 keys=bind_keys
                 loading=bind_keys_loading
                 submitting=bind_submitting
-                error=bind_error
                 selected_key=bind_selected_key
                 writable=bind_writable
                 on_submit=Callback::new(move |_| submit_bind_key())
@@ -719,7 +659,7 @@ pub fn Repos(
                     spawn_local(async move {
                         match api::clear_clone_tasks().await {
                             Ok(tasks) => clone_tasks.set(tasks),
-                            Err(e) => error.set(Some(e)),
+                            Err(e) => toast.error(e),
                         }
                     });
                 })
@@ -828,94 +768,6 @@ fn RepoMoreActionsDropdown(
                 </button>
             </div>
         </Show>
-    }
-}
-
-#[component]
-fn ToastPopup(message: RwSignal<Option<String>>, tone: ToastTone) -> impl IntoView {
-    let rendered = RwSignal::new(None::<String>);
-    let visible = RwSignal::new(false);
-    let generation = RwSignal::new(0_u64);
-
-    create_effect(move |_| {
-        generation.update(|value| *value += 1);
-        let current_generation = generation.get_untracked();
-        match message.get() {
-            Some(next) => {
-                rendered.set(Some(next));
-                visible.set(false);
-                set_timeout(
-                    move || {
-                        if generation.get_untracked() == current_generation
-                            && message.get_untracked().is_some()
-                        {
-                            visible.set(true);
-                        }
-                    },
-                    Duration::from_millis(16),
-                );
-            }
-            None if rendered.get_untracked().is_some() => {
-                visible.set(false);
-                set_timeout(
-                    move || {
-                        if generation.get_untracked() == current_generation
-                            && message.get_untracked().is_none()
-                        {
-                            rendered.set(None);
-                        }
-                    },
-                    Duration::from_millis(220),
-                );
-            }
-            None => {}
-        }
-    });
-
-    view! {
-        <Show when=move || rendered.get().is_some()>
-            <div class=move || toast_container_class(tone, visible.get())>
-                <span class="min-w-0 break-words">{move || rendered.get().unwrap_or_default()}</span>
-                <button
-                    type="button"
-                    title=move || t("common.cancel")
-                    aria-label=move || t("common.cancel")
-                    class=toast_close_class(tone)
-                    on:click=move |_| message.set(None)
-                >
-                    <Icon name=IconName::Close class="size-4" />
-                </button>
-            </div>
-        </Show>
-    }
-}
-
-fn toast_container_class(tone: ToastTone, visible: bool) -> String {
-    let base = "pointer-events-auto flex max-w-sm items-start gap-3 rounded-lg border p-3 text-sm shadow-lg transition-all duration-200 ease-out";
-    let tone_class = match tone {
-        ToastTone::Error => {
-            "border-red-200 bg-red-50 text-red-700 dark:border-red-900 dark:bg-red-950 dark:text-red-300"
-        }
-        ToastTone::Success => {
-            "border-green-200 bg-green-50 text-green-700 dark:border-green-900 dark:bg-green-950 dark:text-green-300"
-        }
-    };
-    let state = if visible {
-        "opacity-100 translate-y-0"
-    } else {
-        "opacity-0 translate-y-2"
-    };
-    format!("{base} {tone_class} {state}")
-}
-
-fn toast_close_class(tone: ToastTone) -> &'static str {
-    match tone {
-        ToastTone::Error => {
-            "inline-flex shrink-0 items-center justify-center size-5 rounded text-red-700/70 hover:text-red-700 focus:outline-none dark:text-red-300/70 dark:hover:text-red-300"
-        }
-        ToastTone::Success => {
-            "inline-flex shrink-0 items-center justify-center size-5 rounded text-green-700/70 hover:text-green-700 focus:outline-none dark:text-green-300/70 dark:hover:text-green-300"
-        }
     }
 }
 
@@ -1252,7 +1104,6 @@ fn BindKeyDialog(
     keys: RwSignal<Vec<SshKey>>,
     loading: RwSignal<bool>,
     submitting: RwSignal<bool>,
-    error: RwSignal<Option<String>>,
     selected_key: RwSignal<Option<i64>>,
     writable: RwSignal<bool>,
     on_submit: Callback<()>,
@@ -1308,12 +1159,6 @@ fn BindKeyDialog(
                     </div>
 
                     <div class="px-6 pb-5 space-y-4">
-                        <Show when=move || error.get().is_some()>
-                            <div class="w-full p-3 text-sm rounded-lg border border-red-200 bg-red-50 text-red-700 dark:border-red-900 dark:bg-red-950 dark:text-red-300">
-                                {move || error.get().unwrap_or_default()}
-                            </div>
-                        </Show>
-
                         <div>
                             <div class="mb-2 text-sm font-medium text-content">{move || t("repos.bind_dialog_key_label")}</div>
                             <Show
@@ -1400,7 +1245,7 @@ fn BindKeyDialog(
                             prop:disabled=move || loading.get() || submitting.get() || selected_key.get().is_none()
                             on:click=move |_| on_submit.call(())
                         >
-                            {move || if submitting.get() { t("repos.bind_dialog_submitting") } else { t("repos.bind_dialog_submit") }}
+                            {move || t("repos.bind_dialog_submit")}
                         </button>
                     </div>
                 </div>

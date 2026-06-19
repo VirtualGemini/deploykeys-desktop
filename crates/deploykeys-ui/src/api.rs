@@ -183,13 +183,13 @@ pub async fn update_ssh_key(id: i64, directory: String, remark: String) -> Resul
     .await
 }
 
-/// Get the public key file content for copying.
-pub async fn get_public_key_content(id: i64) -> Result<String, String> {
+/// Copy the public key file content to the system clipboard.
+pub async fn copy_public_key_to_clipboard(id: i64) -> Result<(), String> {
     #[derive(Serialize)]
     struct Args {
         id: i64,
     }
-    invoke("get_public_key_content", &Args { id }).await
+    invoke("copy_public_key_to_clipboard", &Args { id }).await
 }
 
 /// Check whether the key directory and expected key files still exist.

@@ -14,8 +14,9 @@ use deploykeys_core::progress::{OperationId, ProgressReporter};
 use deploykeys_core::services::{AuthService, KeyBindingService, RepoSyncService, SshKeyService};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::process::Stdio;
+use std::process::{Command, Stdio};
 use std::sync::{
     atomic::{AtomicU64, Ordering},
     Arc, Mutex,
@@ -39,6 +40,8 @@ const REPO_CLONE_PATHS_SETTING_KEY: &str = "repo_clone_paths";
 /// `app_settings` key under which the currently connected connection id is
 /// stored (empty string = all connections offline).
 const ACTIVE_CONNECTION_SETTING_KEY: &str = "active_connection";
+const LOCAL_GIT_CONFIG_REPO_KEY: &str = "deploykeys.repo-id";
+const LOCAL_GIT_CONFIG_REMOTE_KEY: &str = "deploykeys.remote-url";
 
 /// Shared native state, managed by Tauri and injected into every command.
 struct AppState {
@@ -444,11 +447,89 @@ async fn get_public_key_content(state: State<'_, AppState>, id: i64) -> Result<S
     service.read_public_key(id).await.map_err(|e| e.to_string())
 }
 
+/// Read a public key and write it to the system clipboard.
+#[tauri::command]
+async fn copy_public_key_to_clipboard(state: State<'_, AppState>, id: i64) -> Result<(), String> {
+    let service = SshKeyService::new(state.db.clone());
+    let content = service
+        .read_public_key(id)
+        .await
+        .map_err(|e| e.to_string())?;
+
+    tokio::task::spawn_blocking(move || write_to_system_clipboard(&content))
+        .await
+        .map_err(|e| format!("Clipboard task failed: {e}"))?
+}
+
 /// Check whether the key's directory and expected key files still exist.
 #[tauri::command]
 async fn ssh_key_files_exist(state: State<'_, AppState>, id: i64) -> Result<bool, String> {
     let service = SshKeyService::new(state.db.clone());
     service.key_files_exist(id).await.map_err(|e| e.to_string())
+}
+
+#[cfg(target_os = "macos")]
+fn write_to_system_clipboard(content: &str) -> Result<(), String> {
+    write_to_clipboard_command("pbcopy", &[], content)
+}
+
+#[cfg(target_os = "windows")]
+fn write_to_system_clipboard(content: &str) -> Result<(), String> {
+    write_to_clipboard_command("clip", &[], content)
+}
+
+#[cfg(target_os = "linux")]
+fn write_to_system_clipboard(content: &str) -> Result<(), String> {
+    let attempts: &[(&str, &[&str])] = &[
+        ("wl-copy", &[]),
+        ("xclip", &["-selection", "clipboard"]),
+        ("xsel", &["--clipboard", "--input"]),
+    ];
+
+    let mut errors = Vec::new();
+    for (program, args) in attempts {
+        match write_to_clipboard_command(program, args, content) {
+            Ok(()) => return Ok(()),
+            Err(error) => errors.push(error),
+        }
+    }
+
+    Err(format!(
+        "Unable to write to clipboard. Install wl-copy, xclip, or xsel. Attempts: {}",
+        errors.join("; ")
+    ))
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
+fn write_to_system_clipboard(_content: &str) -> Result<(), String> {
+    Err("Clipboard copy is not supported on this platform".to_string())
+}
+
+#[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
+fn write_to_clipboard_command(program: &str, args: &[&str], content: &str) -> Result<(), String> {
+    let mut child = Command::new(program)
+        .args(args)
+        .stdin(Stdio::piped())
+        .spawn()
+        .map_err(|e| format!("Failed to start {program}: {e}"))?;
+
+    let mut stdin = child
+        .stdin
+        .take()
+        .ok_or_else(|| format!("Failed to open stdin for {program}"))?;
+    stdin
+        .write_all(content.as_bytes())
+        .map_err(|e| format!("Failed to write to {program}: {e}"))?;
+    drop(stdin);
+
+    let status = child
+        .wait()
+        .map_err(|e| format!("Failed to wait for {program}: {e}"))?;
+    if status.success() {
+        Ok(())
+    } else {
+        Err(format!("{program} exited with status {status}"))
+    }
 }
 
 /// Upload an existing local SSH key's public key to GitHub as a deploy key,
@@ -567,6 +648,7 @@ async fn connect_repository_remote(
     let local_path = latest_successful_clone_path(&state, repo_id).await?;
     let remote_url = deploy_key_remote_url(&repo);
 
+    ensure_git_worktree(&local_path).await?;
     let args = vec![
         "-C".to_string(),
         path_arg(&local_path),
@@ -576,13 +658,10 @@ async fn connect_repository_remote(
         remote_url.clone(),
     ];
     run_git_checked(&args, None).await?;
+    mark_repository_remote_connected(&local_path, repo.id, &remote_url).await?;
+    let output = git_remote_verbose(&local_path).await?;
 
-    Ok(remote_result(
-        &repo,
-        &local_path,
-        &remote_url,
-        String::new(),
-    ))
+    Ok(remote_result(&repo, &local_path, &remote_url, output))
 }
 
 /// Test that the latest successful local clone can reach `origin`.
@@ -596,10 +675,14 @@ async fn test_repository_remote(
     let local_path = latest_successful_clone_path(&state, repo_id).await?;
     let remote_url = deploy_key_remote_url(&repo);
 
-    ensure_git_remote_matches(&local_path, &remote_url).await?;
+    ensure_local_connection_marker(&local_path, repo.id, &remote_url).await?;
+    ensure_git_worktree(&local_path).await?;
+    let remotes = git_remote_verbose(&local_path).await?;
+    ensure_git_remote_matches(&remotes, &remote_url)?;
+    let ssh_output = test_github_ssh_connection(&binding).await?;
 
     let ssh_command = format!(
-        "ssh -i {} -o IdentitiesOnly=yes",
+        "ssh -i {} -o IdentitiesOnly=yes -o BatchMode=yes -o ConnectTimeout=10",
         shell_quote(&binding.private_key_path)
     );
     let args = vec![
@@ -608,7 +691,12 @@ async fn test_repository_remote(
         "ls-remote".to_string(),
         "origin".to_string(),
     ];
-    let output = run_git_checked(&args, Some(("GIT_SSH_COMMAND", ssh_command.as_str()))).await?;
+    let ls_remote_output =
+        run_git_checked(&args, Some(("GIT_SSH_COMMAND", ssh_command.as_str()))).await?;
+    let output = format!(
+        "git remote -v:\n{}\n\nssh -T git@github.com:\n{}\n\ngit ls-remote origin:\n{}",
+        remotes, ssh_output, ls_remote_output
+    );
 
     Ok(remote_result(&repo, &local_path, &remote_url, output))
 }
@@ -801,48 +889,126 @@ async fn load_repo_clone_paths(db: &Database) -> Result<HashMap<i64, String>, St
     serde_json::from_str(&json).map_err(|e| e.to_string())
 }
 
-async fn ensure_git_remote_matches(local_path: &Path, expected_url: &str) -> Result<(), String> {
+async fn ensure_git_worktree(local_path: &Path) -> Result<(), String> {
+    let args = vec![
+        "-C".to_string(),
+        path_arg(local_path),
+        "rev-parse".to_string(),
+        "--is-inside-work-tree".to_string(),
+    ];
+    let output = run_git_checked(&args, None).await?;
+    if output.trim() == "true" {
+        return Ok(());
+    }
+
+    Err(format!(
+        "Local path is not a valid Git work tree: {}",
+        local_path.display()
+    ))
+}
+
+async fn mark_repository_remote_connected(
+    local_path: &Path,
+    repo_id: i64,
+    remote_url: &str,
+) -> Result<(), String> {
+    let repo_id = repo_id.to_string();
+    set_local_git_config(local_path, LOCAL_GIT_CONFIG_REPO_KEY, &repo_id).await?;
+    set_local_git_config(local_path, LOCAL_GIT_CONFIG_REMOTE_KEY, remote_url).await
+}
+
+async fn set_local_git_config(local_path: &Path, key: &str, value: &str) -> Result<(), String> {
+    let args = vec![
+        "-C".to_string(),
+        path_arg(local_path),
+        "config".to_string(),
+        "--local".to_string(),
+        key.to_string(),
+        value.to_string(),
+    ];
+    run_git_checked(&args, None).await.map(|_| ())
+}
+
+async fn ensure_local_connection_marker(
+    local_path: &Path,
+    repo_id: i64,
+    expected_url: &str,
+) -> Result<(), String> {
+    let expected_repo_id = repo_id.to_string();
+    let actual_repo_id = get_local_git_config(local_path, LOCAL_GIT_CONFIG_REPO_KEY).await?;
+    let actual_remote = get_local_git_config(local_path, LOCAL_GIT_CONFIG_REMOTE_KEY).await?;
+    if actual_repo_id.as_deref() == Some(expected_repo_id.as_str())
+        && actual_remote.as_deref() == Some(expected_url)
+    {
+        return Ok(());
+    }
+
+    Err("Local clone is not connected with DeployKeys. Click Connect first.".to_string())
+}
+
+async fn get_local_git_config(local_path: &Path, key: &str) -> Result<Option<String>, String> {
+    let args = vec![
+        "-C".to_string(),
+        path_arg(local_path),
+        "config".to_string(),
+        "--local".to_string(),
+        "--get".to_string(),
+        key.to_string(),
+    ];
+    let output = run_git_raw(&args, None).await?;
+    if !output.status.success() {
+        return Ok(None);
+    }
+
+    let value = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    if value.is_empty() {
+        Ok(None)
+    } else {
+        Ok(Some(value))
+    }
+}
+
+async fn git_remote_verbose(local_path: &Path) -> Result<String, String> {
     let args = vec![
         "-C".to_string(),
         path_arg(local_path),
         "remote".to_string(),
-        "get-url".to_string(),
-        "origin".to_string(),
+        "-v".to_string(),
     ];
-    let current = run_git_checked(&args, None).await?;
-    let current = current.trim();
-    if current == expected_url {
+    run_git_checked(&args, None).await
+}
+
+fn ensure_git_remote_matches(remote_verbose: &str, expected_url: &str) -> Result<(), String> {
+    let mut origin_urls = Vec::new();
+    for line in remote_verbose.lines() {
+        let mut parts = line.split_whitespace();
+        if parts.next() == Some("origin") {
+            if let Some(url) = parts.next() {
+                origin_urls.push(url.to_string());
+            }
+        }
+    }
+
+    if !origin_urls.is_empty() && origin_urls.iter().all(|url| url == expected_url) {
         return Ok(());
     }
 
     Err(format!(
         "Remote origin is not connected. Click Connect first. Current origin: {}",
-        if current.is_empty() {
+        if origin_urls.is_empty() {
             "(empty)"
         } else {
-            current
+            remote_verbose.trim()
         }
     ))
 }
 
 async fn run_git_checked(args: &[String], env: Option<(&str, &str)>) -> Result<String, String> {
-    let mut command = tokio::process::Command::new(git_program());
-    command
-        .args(args)
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped());
-    if let Some((key, value)) = env {
-        command.env(key, value);
-    }
-
-    let output = command
-        .output()
-        .await
-        .map_err(|e| format!("Failed to start git: {e}"))?;
+    let output = run_git_raw(args, env).await?;
     let stdout = String::from_utf8_lossy(&output.stdout);
     let stderr = String::from_utf8_lossy(&output.stderr);
     if output.status.success() {
-        return Ok(trim_git_output(&stdout, &stderr));
+        return Ok(trim_command_output(&stdout, &stderr));
     }
 
     Err(format_git_failure(
@@ -853,7 +1019,69 @@ async fn run_git_checked(args: &[String], env: Option<(&str, &str)>) -> Result<S
     ))
 }
 
-fn trim_git_output(stdout: &str, stderr: &str) -> String {
+async fn run_git_raw(
+    args: &[String],
+    env: Option<(&str, &str)>,
+) -> Result<std::process::Output, String> {
+    let mut command = tokio::process::Command::new(git_program());
+    command
+        .args(args)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    if let Some((key, value)) = env {
+        command.env(key, value);
+    }
+
+    command
+        .output()
+        .await
+        .map_err(|e| format!("Failed to start git: {e}"))
+}
+
+async fn test_github_ssh_connection(binding: &KeyBinding) -> Result<String, String> {
+    let args = vec![
+        "-T".to_string(),
+        "-i".to_string(),
+        binding.private_key_path.clone(),
+        "-o".to_string(),
+        "IdentitiesOnly=yes".to_string(),
+        "-o".to_string(),
+        "BatchMode=yes".to_string(),
+        "-o".to_string(),
+        "ConnectTimeout=10".to_string(),
+        "git@github.com".to_string(),
+    ];
+    let output = tokio::process::Command::new(ssh_program())
+        .args(&args)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .output()
+        .await
+        .map_err(|e| format!("Failed to start ssh: {e}"))?;
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let detail = trim_command_output(&stdout, &stderr);
+    if output.status.success() || detail.contains("successfully authenticated") {
+        return Ok(detail);
+    }
+
+    let status = output
+        .status
+        .code()
+        .map(|code| code.to_string())
+        .unwrap_or_else(|| "unknown".to_string());
+    Err(format!(
+        "ssh -T git@github.com failed with status {status}: {}",
+        if detail.is_empty() {
+            "No output".to_string()
+        } else {
+            detail
+        }
+    ))
+}
+
+fn trim_command_output(stdout: &str, stderr: &str) -> String {
     let output = if stdout.trim().is_empty() {
         stderr.trim()
     } else {
@@ -1249,6 +1477,14 @@ fn git_program() -> &'static str {
     }
 }
 
+fn ssh_program() -> &'static str {
+    if cfg!(target_os = "macos") {
+        "/usr/bin/ssh"
+    } else {
+        "ssh"
+    }
+}
+
 fn validate_repo_name(name: &str) -> Result<(), String> {
     if name.trim().is_empty() || name.contains('/') || name.contains('\\') {
         return Err(format!("Invalid repository name: {name}"));
@@ -1340,6 +1576,7 @@ pub fn run() {
             delete_ssh_key,
             update_ssh_key,
             get_public_key_content,
+            copy_public_key_to_clipboard,
             ssh_key_files_exist,
             bind_deploy_key,
             clone_repository,

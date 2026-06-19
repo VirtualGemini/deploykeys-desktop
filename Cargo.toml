@@ -41,7 +41,7 @@ russh-keys = "0.45"
 # SSH Key generation
 # Note: the `ecdsa` feature only enables SEC1 encoding; key *generation*
 # requires the per-curve features p256/p384/p521.
-ssh-key = { version = "0.6", features = ["ed25519", "rsa", "p256", "p384", "p521", "std"] }
+ssh-key = { version = "0.6", features = ["ed25519", "p256", "p384", "p521", "std"] }
 
 # System credentials
 keyring = { version = "3.2", features = ["apple-native", "linux-native"] }

@@ -10,6 +10,7 @@ use crate::i18n::t;
 use crate::icons::{Icon, IconName};
 use crate::page_size::page_size;
 use crate::progress::ProgressHandle;
+use crate::toast::ToastHandle;
 use leptos::*;
 use std::time::Duration;
 use wasm_bindgen::JsCast;
@@ -39,11 +40,11 @@ enum CopyIconState {
 #[component]
 pub fn Keys(#[allow(unused_variables)] pending_count: RwSignal<usize>) -> impl IntoView {
     let progress = ProgressHandle::expect();
+    let toast = ToastHandle::expect();
     let conn = connection_state();
     let has_connection = Signal::derive(move || conn.has_active());
     let keys = RwSignal::new(Vec::<SshKey>::new());
     let loading = RwSignal::new(false);
-    let error = RwSignal::new(None::<String>);
     let query = RwSignal::new(String::new());
     let algorithm_filter = RwSignal::new(String::new());
     let created_from = RwSignal::new(String::new());
@@ -60,7 +61,6 @@ pub fn Keys(#[allow(unused_variables)] pending_count: RwSignal<usize>) -> impl I
     create_effect(move |_| {
         if !conn.has_active() {
             keys.set(Vec::new());
-            error.set(None);
             loading.set(false);
             return;
         }
@@ -69,7 +69,7 @@ pub fn Keys(#[allow(unused_variables)] pending_count: RwSignal<usize>) -> impl I
         spawn_local(async move {
             match api::list_ssh_keys().await {
                 Ok(list) => keys.set(list),
-                Err(e) => error.set(Some(e)),
+                Err(e) => toast.error(e),
             }
             loading.set(false);
             progress.end_simulated(&sim);
@@ -81,12 +81,11 @@ pub fn Keys(#[allow(unused_variables)] pending_count: RwSignal<usize>) -> impl I
             return;
         }
         loading.set(true);
-        error.set(None);
         let sim = progress.begin_simulated();
         spawn_local(async move {
             match api::list_ssh_keys().await {
                 Ok(list) => keys.set(list),
-                Err(e) => error.set(Some(e)),
+                Err(e) => toast.error(e),
             }
             loading.set(false);
             progress.end_simulated(&sim);
@@ -207,51 +206,43 @@ pub fn Keys(#[allow(unused_variables)] pending_count: RwSignal<usize>) -> impl I
             }
 
             busy.set(true);
-            icon_state.set(CopyIconState::Copied);
+            icon_state.set(CopyIconState::Copy);
 
-            set_timeout(
-                move || {
-                    let sim = progress.begin_simulated();
-                    icon_state.set(CopyIconState::Copy);
-
-                    spawn_local(async move {
-                        match api::ssh_key_files_exist(id).await {
-                            Ok(true) => {}
-                            Ok(false) => {
-                                missing_key_confirm.set(Some(id));
-                                progress.end_simulated(&sim);
-                                busy.set(false);
-                                return;
-                            }
-                            Err(e) => {
-                                error.set(Some(e));
-                                progress.end_simulated(&sim);
-                                busy.set(false);
-                                return;
-                            }
-                        }
-
-                        match api::get_public_key_content(id).await {
-                            Ok(content) => {
-                                // Copy to clipboard using the Clipboard API
-                                if let Some(window) = web_sys::window() {
-                                    let navigator = window.navigator().clipboard();
-                                    let promise = navigator.write_text(&content);
-                                    let _ = wasm_bindgen_futures::JsFuture::from(promise).await;
-                                    leptos::logging::log!("Public key copied to clipboard");
-                                }
-                            }
-                            Err(e) => {
-                                leptos::logging::error!("Failed to read public key: {}", e);
-                                error.set(Some(e));
-                            }
-                        }
+            let sim = progress.begin_simulated();
+            spawn_local(async move {
+                match api::ssh_key_files_exist(id).await {
+                    Ok(true) => {}
+                    Ok(false) => {
+                        missing_key_confirm.set(Some(id));
                         progress.end_simulated(&sim);
                         busy.set(false);
-                    });
-                },
-                Duration::from_secs(1),
-            );
+                        return;
+                    }
+                    Err(e) => {
+                        toast.error(e);
+                        progress.end_simulated(&sim);
+                        busy.set(false);
+                        return;
+                    }
+                }
+
+                match api::copy_public_key_to_clipboard(id).await {
+                    Ok(()) => {
+                        icon_state.set(CopyIconState::Copied);
+                        toast.success(t("keys.copy_success"));
+                        set_timeout(
+                            move || icon_state.set(CopyIconState::Copy),
+                            Duration::from_secs(1),
+                        );
+                    }
+                    Err(e) => {
+                        leptos::logging::error!("Failed to copy public key: {}", e);
+                        toast.error(e);
+                    }
+                }
+                progress.end_simulated(&sim);
+                busy.set(false);
+            });
         };
 
     let delete_key = move |id: i64| {
@@ -259,11 +250,12 @@ pub fn Keys(#[allow(unused_variables)] pending_count: RwSignal<usize>) -> impl I
         spawn_local(async move {
             match api::delete_ssh_key(id).await {
                 Ok(_) => {
+                    toast.success(t("keys.delete_success"));
                     refresh();
                 }
                 Err(e) => {
                     leptos::logging::error!("Failed to delete key: {}", e);
-                    error.set(Some(e));
+                    toast.error(e);
                 }
             }
             progress.end_simulated(&sim);
@@ -314,12 +306,6 @@ pub fn Keys(#[allow(unused_variables)] pending_count: RwSignal<usize>) -> impl I
                     on_change=reset_page
                 />
             </div>
-
-                <Show when=move || error.get().is_some()>
-                    <div class="w-full p-3 text-sm rounded-lg border border-red-200 bg-red-50 text-red-700 dark:border-red-900 dark:bg-red-950 dark:text-red-300">
-                        {move || error.get().unwrap_or_default()}
-                    </div>
-                </Show>
 
                 <Show
                     when=move || !loading.get()
@@ -1480,6 +1466,7 @@ fn FieldLabelWithHelp(
 #[component]
 fn CreateKeyDialog(open: RwSignal<bool>, on_created: Callback<()>) -> impl IntoView {
     let progress = ProgressHandle::expect();
+    let toast = ToastHandle::expect();
     let directory = RwSignal::new(String::new());
     let comment = RwSignal::new(String::new());
     let remark = RwSignal::new(String::new());
@@ -1534,6 +1521,7 @@ fn CreateKeyDialog(open: RwSignal<bool>, on_created: Callback<()>) -> impl IntoV
                 Ok(_) => {
                     open.set(false);
                     on_created.call(());
+                    toast.success(t("keys.create_success"));
                 }
                 Err(e) => {
                     error.set(Some(e));
@@ -1674,6 +1662,7 @@ fn EditKeyDialog(
     on_done: Callback<()>,
 ) -> impl IntoView {
     let progress = ProgressHandle::expect();
+    let toast = ToastHandle::expect();
     let directory = RwSignal::new(String::new());
     let remark = RwSignal::new(String::new());
     let saving = RwSignal::new(false);
@@ -1724,6 +1713,7 @@ fn EditKeyDialog(
                 Ok(_) => {
                     open.set(false);
                     on_done.call(());
+                    toast.success(t("keys.edit_success"));
                 }
                 Err(e) => {
                     error.set(Some(e));
