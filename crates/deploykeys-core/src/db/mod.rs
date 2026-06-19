@@ -62,6 +62,22 @@ impl Database {
             .run(&self.pool)
             .await
             .map_err(|e| Error::Database(format!("Migration failed: {}", e)))?;
+        self.ensure_ssh_key_directory_index_scope().await?;
+        Ok(())
+    }
+
+    async fn ensure_ssh_key_directory_index_scope(&self) -> Result<()> {
+        sqlx::query!("DROP INDEX IF EXISTS idx_ssh_keys_directory")
+            .execute(&self.pool)
+            .await?;
+        sqlx::query!(
+            r#"
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_ssh_keys_target_directory
+            ON ssh_keys(target_id, directory)
+            "#
+        )
+        .execute(&self.pool)
+        .await?;
         Ok(())
     }
 

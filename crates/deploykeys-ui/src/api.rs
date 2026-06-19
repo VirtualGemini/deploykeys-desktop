@@ -57,6 +57,41 @@ pub async fn set_active_connection(value: &str) -> Result<(), String> {
     invoke("set_active_connection", &Args { value }).await
 }
 
+pub async fn get_ssh_key_storage_dir() -> Result<String, String> {
+    invoke_no_args("get_ssh_key_storage_dir").await
+}
+
+pub async fn set_ssh_key_storage_dir(path: String) -> Result<String, String> {
+    #[derive(Serialize)]
+    struct Args {
+        path: String,
+    }
+    invoke("set_ssh_key_storage_dir", &Args { path }).await
+}
+
+pub async fn pick_ssh_key_storage_dir() -> Result<Option<String>, String> {
+    invoke_no_args("pick_ssh_key_storage_dir").await
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SshConfigFile {
+    pub path: String,
+    pub content: String,
+}
+
+pub async fn get_ssh_config_file() -> Result<SshConfigFile, String> {
+    invoke_no_args("get_ssh_config_file").await
+}
+
+pub async fn save_ssh_config_file(content: String) -> Result<SshConfigFile, String> {
+    #[derive(Serialize)]
+    struct Args {
+        content: String,
+    }
+    invoke("save_ssh_config_file", &Args { content }).await
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ConnectionDto {
@@ -106,16 +141,75 @@ pub async fn create_remote_connection(
     .await
 }
 
-pub async fn pick_ssh_private_key() -> Result<Option<String>, String> {
-    invoke_no_args("pick_ssh_private_key").await
+pub async fn update_remote_connection(
+    id: String,
+    alias: String,
+    host: String,
+    port: u16,
+    username: String,
+    auth_method: String,
+    auth_secret: String,
+) -> Result<ConnectionDto, String> {
+    #[derive(Serialize)]
+    #[serde(rename_all = "camelCase")]
+    struct Args {
+        id: String,
+        alias: String,
+        host: String,
+        port: u16,
+        username: String,
+        auth_method: String,
+        auth_secret: String,
+    }
+    invoke(
+        "update_remote_connection",
+        &Args {
+            id,
+            alias,
+            host,
+            port,
+            username,
+            auth_method,
+            auth_secret,
+        },
+    )
+    .await
 }
 
-pub async fn test_connection(id: &str) -> Result<ConnectionDto, String> {
+pub async fn test_remote_connection_config(
+    id: Option<String>,
+    host: String,
+    port: u16,
+    username: String,
+    auth_method: String,
+    auth_secret: String,
+) -> Result<(), String> {
     #[derive(Serialize)]
-    struct Args<'a> {
-        id: &'a str,
+    #[serde(rename_all = "camelCase")]
+    struct Args {
+        id: Option<String>,
+        host: String,
+        port: u16,
+        username: String,
+        auth_method: String,
+        auth_secret: String,
     }
-    invoke("test_connection", &Args { id }).await
+    invoke(
+        "test_remote_connection_config",
+        &Args {
+            id,
+            host,
+            port,
+            username,
+            auth_method,
+            auth_secret,
+        },
+    )
+    .await
+}
+
+pub async fn pick_ssh_private_key() -> Result<Option<String>, String> {
+    invoke_no_args("pick_ssh_private_key").await
 }
 
 pub async fn delete_connection(id: &str) -> Result<(), String> {

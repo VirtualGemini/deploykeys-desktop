@@ -7,7 +7,7 @@ use crate::{
         DeployKeyPermission, KeyAlgorithm, KeyBinding, KeyBindingStatus, KeyResidency, Target,
         TargetType,
     },
-    ssh::{dirname_remote_path, quote_shell, run_remote_command},
+    ssh::{dirname_remote_path, quote_remote_path, quote_shell, run_remote_command},
     Error, Result,
 };
 use chrono::Utc;
@@ -557,9 +557,9 @@ async fn read_target_public_key(
             let dir = dirname_remote_path(&ssh_key.private_key_path).unwrap_or_default();
             let command = format!(
                 "test -d {dir} && test -f {private_key} && test -f {public_key} && cat {public_key}",
-                dir = quote_shell(&dir),
-                private_key = quote_shell(&ssh_key.private_key_path),
-                public_key = quote_shell(&ssh_key.public_key_path),
+                dir = quote_remote_path(&dir),
+                private_key = quote_remote_path(&ssh_key.private_key_path),
+                public_key = quote_remote_path(&ssh_key.public_key_path),
             );
             Ok(run_remote_command(target, &command)
                 .await?
@@ -576,7 +576,7 @@ async fn target_private_key_exists(target: &Target, private_key_path: &str) -> R
             .await
             .unwrap_or(false)),
         TargetType::Remote => {
-            let command = format!("test -f {}", quote_shell(private_key_path));
+            let command = format!("test -f {}", quote_remote_path(private_key_path));
             Ok(run_remote_command(target, &command).await.is_ok())
         }
     }

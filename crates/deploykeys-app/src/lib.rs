@@ -15,6 +15,7 @@ use deploykeys_core::progress::{OperationId, ProgressReporter};
 use deploykeys_core::services::{
     AuthService, KeyBindingService, RepoSyncService, SshKeyService, TargetService,
 };
+use deploykeys_core::ssh::{quote_shell, run_remote_command};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::io::Write;
@@ -43,6 +44,7 @@ const REPO_CLONE_PATHS_SETTING_KEY: &str = "repo_clone_paths";
 /// `app_settings` key under which the currently connected connection id is
 /// stored (empty string = all connections offline).
 const ACTIVE_CONNECTION_SETTING_KEY: &str = "active_connection";
+const SSH_CONFIG_FILE_NAME: &str = "config";
 const LOCAL_GIT_CONFIG_REPO_KEY: &str = "deploykeys.repo-id";
 const LOCAL_GIT_CONFIG_REMOTE_KEY: &str = "deploykeys.remote-url";
 
@@ -190,6 +192,13 @@ struct ConnectionDto {
     key_base_dir: String,
 }
 
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SshConfigFileDto {
+    path: String,
+    content: String,
+}
+
 /// Payload sent to the webview for each progress checkpoint.
 #[derive(Clone, Serialize)]
 struct ProgressEvent {
@@ -314,6 +323,181 @@ async fn set_active_connection(state: State<'_, AppState>, value: String) -> Res
 }
 
 #[tauri::command]
+async fn get_ssh_key_storage_dir(state: State<'_, AppState>) -> Result<String, String> {
+    let target = TargetService::new(state.db.clone())
+        .ensure_local_target()
+        .await
+        .map_err(|e| e.to_string())?;
+    let normalized = home_relative_path(&target.key_base_dir)?;
+    if normalized != target.key_base_dir {
+        state
+            .db
+            .targets()
+            .update_key_base_dir(target.id, &normalized)
+            .await
+            .map_err(|e| e.to_string())?;
+    }
+    Ok(normalized)
+}
+
+#[tauri::command]
+async fn set_ssh_key_storage_dir(
+    state: State<'_, AppState>,
+    path: String,
+) -> Result<String, String> {
+    let (normalized, dir) = normalize_key_storage_path(&path)?;
+    tokio::fs::create_dir_all(&dir)
+        .await
+        .map_err(|e| format!("Failed to create directory: {e}"))?;
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        tokio::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700))
+            .await
+            .map_err(|e| format!("Failed to set directory permissions: {e}"))?;
+    }
+
+    let target = TargetService::new(state.db.clone())
+        .ensure_local_target()
+        .await
+        .map_err(|e| e.to_string())?;
+    state
+        .db
+        .targets()
+        .update_key_base_dir(target.id, &normalized)
+        .await
+        .map_err(|e| e.to_string())?;
+    Ok(normalized)
+}
+
+#[tauri::command]
+async fn pick_ssh_key_storage_dir(app: AppHandle) -> Result<Option<String>, String> {
+    let Some(path) = app
+        .dialog()
+        .file()
+        .set_title("Select SSH key storage directory")
+        .blocking_pick_folder()
+    else {
+        return Ok(None);
+    };
+    Ok(Some(
+        path.into_path()
+            .map_err(|e| e.to_string())?
+            .to_string_lossy()
+            .to_string(),
+    ))
+}
+
+#[tauri::command]
+async fn get_ssh_config_file(state: State<'_, AppState>) -> Result<SshConfigFileDto, String> {
+    let target = active_target(&state).await?;
+    if target.target_type == TargetType::Remote {
+        return get_remote_ssh_config_file(&target).await;
+    }
+    get_local_ssh_config_file().await
+}
+
+async fn get_local_ssh_config_file() -> Result<SshConfigFileDto, String> {
+    let path = ssh_config_path()?;
+    let content = match tokio::fs::read_to_string(&path).await {
+        Ok(content) => content,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => String::new(),
+        Err(e) => return Err(format!("Failed to read SSH config: {e}")),
+    };
+    Ok(SshConfigFileDto {
+        path: path.to_string_lossy().to_string(),
+        content,
+    })
+}
+
+#[tauri::command]
+async fn save_ssh_config_file(
+    state: State<'_, AppState>,
+    content: String,
+) -> Result<SshConfigFileDto, String> {
+    let target = active_target(&state).await?;
+    if target.target_type == TargetType::Remote {
+        return save_remote_ssh_config_file(&target, content).await;
+    }
+    save_local_ssh_config_file(content).await
+}
+
+async fn save_local_ssh_config_file(content: String) -> Result<SshConfigFileDto, String> {
+    let path = ssh_config_path()?;
+    let ssh_dir = path
+        .parent()
+        .ok_or_else(|| "SSH config path has no parent directory".to_string())?;
+    tokio::fs::create_dir_all(ssh_dir)
+        .await
+        .map_err(|e| format!("Failed to create SSH directory: {e}"))?;
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        tokio::fs::set_permissions(ssh_dir, std::fs::Permissions::from_mode(0o700))
+            .await
+            .map_err(|e| format!("Failed to set SSH directory permissions: {e}"))?;
+    }
+
+    let temp_path = path.with_file_name(format!("{SSH_CONFIG_FILE_NAME}.deploykeys.tmp"));
+    tokio::fs::write(&temp_path, content.as_bytes())
+        .await
+        .map_err(|e| format!("Failed to save SSH config: {e}"))?;
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        tokio::fs::set_permissions(&temp_path, std::fs::Permissions::from_mode(0o600))
+            .await
+            .map_err(|e| format!("Failed to set SSH config permissions: {e}"))?;
+    }
+
+    if let Err(e) = tokio::fs::rename(&temp_path, &path).await {
+        let _ = tokio::fs::remove_file(&temp_path).await;
+        return Err(format!("Failed to save SSH config: {e}"));
+    }
+
+    Ok(SshConfigFileDto {
+        path: path.to_string_lossy().to_string(),
+        content,
+    })
+}
+
+async fn get_remote_ssh_config_file(target: &Target) -> Result<SshConfigFileDto, String> {
+    let command = "set -eu; if [ -f ~/.ssh/config ]; then cat ~/.ssh/config; fi";
+    let output = run_remote_command(target, command)
+        .await
+        .map_err(|e| e.to_string())?;
+    Ok(SshConfigFileDto {
+        path: format!("{}: ~/.ssh/config", target.alias),
+        content: output.stdout,
+    })
+}
+
+async fn save_remote_ssh_config_file(
+    target: &Target,
+    content: String,
+) -> Result<SshConfigFileDto, String> {
+    let command = format!(
+        "set -eu; \
+         mkdir -p ~/.ssh; chmod 700 ~/.ssh; \
+         tmp=$(mktemp ~/.ssh/config.deploykeys.XXXXXX); \
+         printf '%s' {content} > \"$tmp\"; \
+         chmod 600 \"$tmp\"; \
+         mv \"$tmp\" ~/.ssh/config; chmod 600 ~/.ssh/config",
+        content = quote_shell(&content),
+    );
+    run_remote_command(target, &command)
+        .await
+        .map_err(|e| e.to_string())?;
+    Ok(SshConfigFileDto {
+        path: format!("{}: ~/.ssh/config", target.alias),
+        content,
+    })
+}
+
+#[tauri::command]
 async fn list_connections(state: State<'_, AppState>) -> Result<Vec<ConnectionDto>, String> {
     let service = TargetService::new(state.db.clone());
     let targets = service.list_targets().await.map_err(|e| e.to_string())?;
@@ -350,6 +534,63 @@ async fn create_remote_connection(
 }
 
 #[tauri::command]
+async fn update_remote_connection(
+    state: State<'_, AppState>,
+    id: String,
+    alias: String,
+    host: String,
+    port: u16,
+    username: String,
+    auth_method: String,
+    auth_secret: String,
+) -> Result<ConnectionDto, String> {
+    let Some(target_id) = remote_connection_target_id(&id)? else {
+        return Err("The local connection cannot be edited".to_string());
+    };
+    let auth_method: AuthMethod = auth_method
+        .parse()
+        .map_err(|e| format!("Invalid auth method: {e}"))?;
+    let service = TargetService::new(state.db.clone());
+    let target = service
+        .update_remote_target(
+            target_id,
+            alias,
+            host,
+            port,
+            username,
+            auth_method,
+            auth_secret,
+        )
+        .await
+        .map_err(|e| e.to_string())?;
+    Ok(connection_dto(target))
+}
+
+#[tauri::command]
+async fn test_remote_connection_config(
+    state: State<'_, AppState>,
+    id: Option<String>,
+    host: String,
+    port: u16,
+    username: String,
+    auth_method: String,
+    auth_secret: String,
+) -> Result<(), String> {
+    let target_id = id
+        .as_deref()
+        .map(remote_connection_target_id)
+        .transpose()?
+        .flatten();
+    let auth_method: AuthMethod = auth_method
+        .parse()
+        .map_err(|e| format!("Invalid auth method: {e}"))?;
+    TargetService::new(state.db.clone())
+        .test_remote_target_config(target_id, host, port, username, auth_method, auth_secret)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
 async fn pick_ssh_private_key(app: AppHandle) -> Result<Option<String>, String> {
     let Some(path) = app
         .dialog()
@@ -365,22 +606,6 @@ async fn pick_ssh_private_key(app: AppHandle) -> Result<Option<String>, String> 
             .to_string_lossy()
             .to_string(),
     ))
-}
-
-#[tauri::command]
-async fn test_connection(state: State<'_, AppState>, id: String) -> Result<ConnectionDto, String> {
-    let target = resolve_connection_target(&state.db, &id)
-        .await
-        .map_err(|e| e.to_string())?;
-    if target.target_type == TargetType::Remote {
-        let service = TargetService::new(state.db.clone());
-        let checked = service
-            .check_target(target.id)
-            .await
-            .map_err(|e| e.to_string())?;
-        return Ok(connection_dto(checked));
-    }
-    Ok(connection_dto(target))
 }
 
 #[tauri::command]
@@ -928,6 +1153,62 @@ fn remote_connection_target_id(value: &str) -> Result<Option<i64>, String> {
     raw.parse::<i64>()
         .map(Some)
         .map_err(|_| format!("Invalid connection id: {value}"))
+}
+
+fn normalize_key_storage_path(value: &str) -> Result<(String, PathBuf), String> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return Err("Path is required".to_string());
+    }
+
+    let expanded = expand_home_path(trimmed)?;
+    if !expanded.is_absolute() {
+        return Err("Path must be absolute or start with ~/".to_string());
+    }
+
+    let stored = home_relative_path(&expanded.to_string_lossy())?;
+    Ok((stored, expanded))
+}
+
+fn expand_home_path(value: &str) -> Result<PathBuf, String> {
+    let path = if value == "~" {
+        dirs::home_dir().ok_or_else(|| "Could not find home directory".to_string())?
+    } else if let Some(rest) = value.strip_prefix("~/") {
+        dirs::home_dir()
+            .ok_or_else(|| "Could not find home directory".to_string())?
+            .join(rest)
+    } else {
+        PathBuf::from(value)
+    };
+    Ok(path)
+}
+
+fn home_relative_path(value: &str) -> Result<String, String> {
+    let path = expand_home_path(value)?;
+    let home = dirs::home_dir().ok_or_else(|| "Could not find home directory".to_string())?;
+    if path == home {
+        return Ok("~".to_string());
+    }
+    if let Ok(rest) = path.strip_prefix(&home) {
+        let rest = rest.to_string_lossy();
+        if rest.is_empty() {
+            Ok("~".to_string())
+        } else {
+            Ok(format!("~/{}", rest.trim_start_matches('/')))
+        }
+    } else {
+        let normalized = path.to_string_lossy().trim_end_matches('/').to_string();
+        if normalized.is_empty() {
+            Ok(std::path::MAIN_SEPARATOR.to_string())
+        } else {
+            Ok(normalized)
+        }
+    }
+}
+
+fn ssh_config_path() -> Result<PathBuf, String> {
+    let home = dirs::home_dir().ok_or_else(|| "Could not find home directory".to_string())?;
+    Ok(home.join(".ssh").join(SSH_CONFIG_FILE_NAME))
 }
 
 async fn ensure_key_belongs_to_active_target(
@@ -1777,10 +2058,16 @@ pub fn run() {
             set_page_size,
             get_active_connection,
             set_active_connection,
+            get_ssh_key_storage_dir,
+            set_ssh_key_storage_dir,
+            pick_ssh_key_storage_dir,
+            get_ssh_config_file,
+            save_ssh_config_file,
             list_connections,
             create_remote_connection,
+            update_remote_connection,
+            test_remote_connection_config,
             pick_ssh_private_key,
-            test_connection,
             delete_connection,
             sign_in_with_token,
             open_url,

@@ -172,6 +172,56 @@ impl TargetRepository {
         Ok(())
     }
 
+    pub async fn update_key_base_dir(&self, id: i64, key_base_dir: &str) -> Result<()> {
+        sqlx::query!(
+            r#"
+            UPDATE targets
+            SET key_base_dir = ?
+            WHERE id = ?
+            "#,
+            key_base_dir,
+            id
+        )
+        .execute(&self.pool)
+        .await?;
+
+        Ok(())
+    }
+
+    /// Update editable connection fields for a remote target.
+    pub async fn update_connection(&self, target: &Target) -> Result<()> {
+        let os = target.os.to_string();
+        let auth_method = target.auth_method.as_ref().map(|a| a.to_string());
+        let status = target.status.to_string();
+        let last_checked_at = target.last_checked_at.map(|t| t.timestamp());
+
+        sqlx::query!(
+            r#"
+            UPDATE targets
+            SET alias = ?, os = ?, host = ?, port = ?, username = ?,
+                auth_method = ?, auth_ref = ?, key_base_dir = ?, status = ?,
+                host_key_fingerprint = ?, last_checked_at = ?
+            WHERE id = ?
+            "#,
+            target.alias,
+            os,
+            target.host,
+            target.port,
+            target.username,
+            auth_method,
+            target.auth_ref,
+            target.key_base_dir,
+            status,
+            target.host_key_fingerprint,
+            last_checked_at,
+            target.id
+        )
+        .execute(&self.pool)
+        .await?;
+
+        Ok(())
+    }
+
     pub async fn delete(&self, id: i64) -> Result<()> {
         sqlx::query!("DELETE FROM targets WHERE id = ?", id)
             .execute(&self.pool)

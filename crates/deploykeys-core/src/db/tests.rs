@@ -1,7 +1,8 @@
 use crate::db::test_support::{seed_account, seed_repository, seed_target, test_db};
 use crate::db::Database;
 use crate::models::{
-    DeployKeyPermission, KeyAlgorithm, KeyBinding, KeyBindingStatus, KeyResidency,
+    DeployKeyPermission, KeyAlgorithm, KeyBinding, KeyBindingStatus, KeyResidency, OsType, SshKey,
+    Target, TargetStatus, TargetType,
 };
 use chrono::Utc;
 use tempfile::TempDir;
@@ -128,6 +129,45 @@ fn sample_binding(repo_id: i64, target_id: i64) -> KeyBinding {
     }
 }
 
+fn sample_ssh_key(directory: &str, target_id: i64) -> SshKey {
+    SshKey {
+        id: 0,
+        directory: directory.to_string(),
+        algorithm: KeyAlgorithm::Ed25519,
+        public_key: format!("ssh-ed25519 AAAA{target_id}"),
+        public_key_fingerprint: format!("SHA256:{target_id}"),
+        private_key_path: format!("/tmp/{target_id}/{directory}/id_ed25519"),
+        public_key_path: format!("/tmp/{target_id}/{directory}/id_ed25519.pub"),
+        comment: "user@example.com".to_string(),
+        remark: String::new(),
+        target_id,
+        created_at: Utc::now(),
+    }
+}
+
+async fn seed_second_target(db: &Database) -> i64 {
+    let target = Target {
+        id: 0,
+        target_type: TargetType::Remote,
+        alias: "Second Target".to_string(),
+        os: OsType::Linux,
+        host: Some("example.com".to_string()),
+        port: Some(22),
+        username: Some("root".to_string()),
+        auth_method: None,
+        auth_ref: None,
+        key_base_dir: "/tmp/remote-keys".to_string(),
+        status: TargetStatus::Active,
+        host_key_fingerprint: None,
+        created_at: Utc::now(),
+        last_checked_at: None,
+    };
+    db.targets()
+        .create(&target)
+        .await
+        .expect("seed second target")
+}
+
 #[tokio::test]
 async fn key_binding_unique_constraint_is_enforced() {
     let (_dir, db) = test_db().await;
@@ -143,6 +183,32 @@ async fn key_binding_unique_constraint_is_enforced() {
     // Same (repo_id, target_id) pair must be rejected.
     let result = db.key_bindings().create(&binding).await;
     assert!(result.is_err());
+}
+
+#[tokio::test]
+async fn ssh_key_directory_unique_constraint_is_scoped_to_target() {
+    let (_dir, db) = test_db().await;
+    let local_target_id = seed_target(&db).await;
+    let remote_target_id = seed_second_target(&db).await;
+
+    let first = sample_ssh_key("shared-name", local_target_id);
+    let duplicate_on_same_target = sample_ssh_key("shared-name", local_target_id);
+    let same_directory_on_other_target = sample_ssh_key("shared-name", remote_target_id);
+
+    db.ssh_keys().create(&first).await.unwrap();
+
+    let same_target_result = db.ssh_keys().create(&duplicate_on_same_target).await;
+    assert!(
+        same_target_result.is_err(),
+        "same target must still reject duplicate directories"
+    );
+
+    let other_target_id = db
+        .ssh_keys()
+        .create(&same_directory_on_other_target)
+        .await
+        .expect("different targets may use the same directory");
+    assert!(other_target_id > 0);
 }
 
 #[tokio::test]

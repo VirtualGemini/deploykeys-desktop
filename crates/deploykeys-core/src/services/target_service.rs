@@ -126,7 +126,7 @@ impl TargetService {
             }
         };
 
-        let mut target = Target {
+        let target = Target {
             id: 0,
             target_type: TargetType::Remote,
             alias,
@@ -143,12 +143,6 @@ impl TargetService {
             last_checked_at: None,
         };
 
-        if let Err(e) = self.check_remote_target(&mut target).await {
-            if auth_method == AuthMethod::Password {
-                let _ = CredentialStore::delete_credential(&auth_ref);
-            }
-            return Err(e);
-        }
         let id = match self.db.targets().create(&target).await {
             Ok(id) => id,
             Err(e) => {
@@ -173,6 +167,213 @@ impl TargetService {
             self.db.targets().update(&target).await?;
         }
         Ok(target)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub async fn test_remote_target_config(
+        &self,
+        id: Option<i64>,
+        host: String,
+        port: u16,
+        username: String,
+        auth_method: AuthMethod,
+        auth_secret: String,
+    ) -> Result<()> {
+        let host = host.trim().to_string();
+        let username = username.trim().to_string();
+        let auth_secret = auth_secret.trim().to_string();
+        if host.is_empty() {
+            return Err(Error::Validation("Host is required".into()));
+        }
+        if username.is_empty() {
+            return Err(Error::Validation("Username is required".into()));
+        }
+
+        let existing = if let Some(id) = id {
+            let target = self
+                .db
+                .targets()
+                .find_by_id(id)
+                .await?
+                .ok_or_else(|| Error::NotFound("Connection not found".into()))?;
+            if target.target_type == TargetType::Local {
+                return Err(Error::Validation(
+                    "The local connection cannot be tested here".into(),
+                ));
+            }
+            Some(target)
+        } else {
+            None
+        };
+
+        let mut temp_password_ref = None::<String>;
+        let auth_ref = match (&existing, &auth_method, auth_secret.is_empty()) {
+            (Some(existing), method, true) if existing.auth_method.as_ref() == Some(method) => {
+                existing.auth_ref.clone().ok_or_else(|| {
+                    Error::Validation("Saved authentication reference is missing".into())
+                })?
+            }
+            (_, AuthMethod::SshKey, false) => auth_secret,
+            (_, AuthMethod::Password, false) => {
+                let ref_key = format!("ssh_password_connection_test_{}", rand::random::<u64>());
+                let stored = CredentialStore::store_ssh_password_ref(&ref_key, &auth_secret)?;
+                temp_password_ref = Some(stored.clone());
+                stored
+            }
+            (_, AuthMethod::SshKey, true) => {
+                return Err(Error::Validation("SSH private key path is required".into()));
+            }
+            (_, AuthMethod::Password, true) => {
+                return Err(Error::Validation("SSH password is required".into()));
+            }
+        };
+
+        let mut target = Target {
+            id: existing
+                .as_ref()
+                .map(|target| target.id)
+                .unwrap_or_default(),
+            target_type: TargetType::Remote,
+            alias: existing
+                .as_ref()
+                .map(|target| target.alias.clone())
+                .unwrap_or_else(|| "Connection test".to_string()),
+            os: OsType::Unknown,
+            host: Some(host),
+            port: Some(port),
+            username: Some(username),
+            auth_method: Some(auth_method),
+            auth_ref: Some(auth_ref),
+            key_base_dir: existing
+                .as_ref()
+                .map(|target| target.key_base_dir.clone())
+                .unwrap_or_else(|| normalize_key_base_dir("")),
+            status: TargetStatus::Unknown,
+            host_key_fingerprint: None,
+            created_at: existing
+                .as_ref()
+                .map(|target| target.created_at)
+                .unwrap_or_else(Utc::now),
+            last_checked_at: None,
+        };
+
+        let result = self.check_remote_target(&mut target).await.map(|_| ());
+        if let Some(auth_ref) = temp_password_ref.as_deref() {
+            let _ = CredentialStore::delete_credential(auth_ref);
+        }
+        result
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub async fn update_remote_target(
+        &self,
+        id: i64,
+        alias: String,
+        host: String,
+        port: u16,
+        username: String,
+        auth_method: AuthMethod,
+        auth_secret: String,
+    ) -> Result<Target> {
+        let existing = self
+            .db
+            .targets()
+            .find_by_id(id)
+            .await?
+            .ok_or_else(|| Error::NotFound("Connection not found".into()))?;
+        if existing.target_type == TargetType::Local {
+            return Err(Error::Validation(
+                "The local connection cannot be edited".into(),
+            ));
+        }
+
+        let alias = alias.trim().to_string();
+        let host = host.trim().to_string();
+        let username = username.trim().to_string();
+        let auth_secret = auth_secret.trim().to_string();
+        if alias.is_empty() {
+            return Err(Error::Validation("Alias is required".into()));
+        }
+        if host.is_empty() {
+            return Err(Error::Validation("Host is required".into()));
+        }
+        if username.is_empty() {
+            return Err(Error::Validation("Username is required".into()));
+        }
+        if let Some(found) = self.db.targets().find_by_alias(&alias).await? {
+            if found.id != id {
+                return Err(Error::AlreadyExists(format!(
+                    "Connection '{}' already exists",
+                    alias
+                )));
+            }
+        }
+
+        let previous_password_ref = (existing.auth_method == Some(AuthMethod::Password))
+            .then(|| existing.auth_ref.clone())
+            .flatten();
+        let mut new_password_ref = None::<String>;
+        let auth_ref = match (&existing.auth_method, &auth_method, auth_secret.is_empty()) {
+            (Some(AuthMethod::SshKey), AuthMethod::SshKey, true)
+            | (Some(AuthMethod::Password), AuthMethod::Password, true) => {
+                existing.auth_ref.clone().ok_or_else(|| {
+                    Error::Validation("Saved authentication reference is missing".into())
+                })?
+            }
+            (_, AuthMethod::SshKey, false) => auth_secret,
+            (_, AuthMethod::Password, false) => {
+                let ref_key = format!(
+                    "ssh_password_connection_{}_{}",
+                    credential_key_part(&alias),
+                    rand::random::<u64>()
+                );
+                let stored = CredentialStore::store_ssh_password_ref(&ref_key, &auth_secret)?;
+                new_password_ref = Some(stored.clone());
+                stored
+            }
+            (_, AuthMethod::SshKey, true) => {
+                return Err(Error::Validation("SSH private key path is required".into()));
+            }
+            (_, AuthMethod::Password, true) => {
+                return Err(Error::Validation("SSH password is required".into()));
+            }
+        };
+
+        let next = Target {
+            alias,
+            os: OsType::Unknown,
+            host: Some(host),
+            port: Some(port),
+            username: Some(username),
+            auth_method: Some(auth_method.clone()),
+            auth_ref: Some(auth_ref),
+            status: TargetStatus::Unknown,
+            host_key_fingerprint: None,
+            last_checked_at: None,
+            ..existing
+        };
+
+        if let Err(e) = self.db.targets().update_connection(&next).await {
+            if let Some(auth_ref) = new_password_ref.as_deref() {
+                let _ = CredentialStore::delete_credential(auth_ref);
+            }
+            return Err(e);
+        }
+
+        if auth_method == AuthMethod::Password {
+            if let (Some(previous), Some(new_ref)) = (
+                previous_password_ref.as_deref(),
+                new_password_ref.as_deref(),
+            ) {
+                if previous != new_ref {
+                    let _ = CredentialStore::delete_credential(previous);
+                }
+            }
+        } else if let Some(previous) = previous_password_ref.as_deref() {
+            let _ = CredentialStore::delete_credential(previous);
+        }
+
+        Ok(next)
     }
 
     pub async fn delete_remote_target(&self, id: i64) -> Result<()> {
@@ -233,13 +434,7 @@ fn detect_os() -> OsType {
 }
 
 fn default_local_key_base_dir() -> Result<String> {
-    let home =
-        dirs::home_dir().ok_or_else(|| Error::Other("Could not find home directory".into()))?;
-    Ok(home
-        .join(".ssh")
-        .join("deploykeys")
-        .to_string_lossy()
-        .to_string())
+    Ok("~/.ssh/deploykeys".to_string())
 }
 
 fn normalize_key_base_dir(value: &str) -> String {

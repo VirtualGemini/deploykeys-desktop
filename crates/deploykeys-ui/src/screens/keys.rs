@@ -1472,7 +1472,6 @@ fn CreateKeyDialog(open: RwSignal<bool>, on_created: Callback<()>) -> impl IntoV
     let remark = RwSignal::new(String::new());
     let algorithm = RwSignal::new("ed25519".to_string());
     let creating = RwSignal::new(false);
-    let error = RwSignal::new(None::<String>);
     let algorithm_options = Signal::derive(move || {
         vec![
             (
@@ -1497,7 +1496,6 @@ fn CreateKeyDialog(open: RwSignal<bool>, on_created: Callback<()>) -> impl IntoV
             comment.set(String::new());
             remark.set(String::new());
             algorithm.set("ed25519".to_string());
-            error.set(None);
         }
     });
 
@@ -1508,12 +1506,11 @@ fn CreateKeyDialog(open: RwSignal<bool>, on_created: Callback<()>) -> impl IntoV
         let algorithm_val = algorithm.get_untracked();
 
         if directory_val.is_empty() || comment_val.is_empty() {
-            error.set(Some(t("keys.required").to_string()));
+            toast.error(t("keys.required"));
             return;
         }
 
         creating.set(true);
-        error.set(None);
         let sim = progress.begin_simulated();
 
         spawn_local(async move {
@@ -1524,7 +1521,7 @@ fn CreateKeyDialog(open: RwSignal<bool>, on_created: Callback<()>) -> impl IntoV
                     toast.success(t("keys.create_success"));
                 }
                 Err(e) => {
-                    error.set(Some(e));
+                    toast.error(e);
                 }
             }
             creating.set(false);
@@ -1555,12 +1552,6 @@ fn CreateKeyDialog(open: RwSignal<bool>, on_created: Callback<()>) -> impl IntoV
                 </div>
 
                     <div class="px-6 py-5 space-y-4">
-                        <Show when=move || error.get().is_some()>
-                            <div class="p-3 text-sm rounded-lg border border-red-200 bg-red-50 text-red-700 dark:border-red-900 dark:bg-red-950 dark:text-red-300">
-                                {move || error.get().unwrap_or_default()}
-                            </div>
-                        </Show>
-
                         <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
                             // Directory
                             <div class="min-w-0">
@@ -1666,15 +1657,13 @@ fn EditKeyDialog(
     let directory = RwSignal::new(String::new());
     let remark = RwSignal::new(String::new());
     let saving = RwSignal::new(false);
-    let error = RwSignal::new(None::<String>);
 
     // Seed the inputs with the current values whenever the dialog opens, and
-    // clear transient error state so a previous failure does not linger.
+    // keep the latest row values in the form.
     create_effect(move |_| {
         if open.get() {
             directory.set(current_directory.clone());
             remark.set(current_remark.clone());
-            error.set(None);
         }
     });
 
@@ -1683,12 +1672,11 @@ fn EditKeyDialog(
         let remark_val = remark.get_untracked().trim().to_string();
 
         if directory_val.is_empty() {
-            error.set(Some(t("keys.required").to_string()));
+            toast.error(t("keys.required"));
             return;
         }
 
         saving.set(true);
-        error.set(None);
         let sim = progress.begin_simulated();
 
         spawn_local(async move {
@@ -1702,7 +1690,7 @@ fn EditKeyDialog(
                     return;
                 }
                 Err(e) => {
-                    error.set(Some(e));
+                    toast.error(e);
                     saving.set(false);
                     progress.end_simulated(&sim);
                     return;
@@ -1716,7 +1704,7 @@ fn EditKeyDialog(
                     toast.success(t("keys.edit_success"));
                 }
                 Err(e) => {
-                    error.set(Some(e));
+                    toast.error(e);
                 }
             }
             saving.set(false);
@@ -1747,12 +1735,6 @@ fn EditKeyDialog(
                 </div>
 
                     <div class="px-6 py-5 space-y-4">
-                        <Show when=move || error.get().is_some()>
-                            <div class="p-3 text-sm rounded-lg border border-red-200 bg-red-50 text-red-700 dark:border-red-900 dark:bg-red-950 dark:text-red-300">
-                                {move || error.get().unwrap_or_default()}
-                            </div>
-                        </Show>
-
                         // Directory
                         <div>
                             <FieldLabelWithHelp

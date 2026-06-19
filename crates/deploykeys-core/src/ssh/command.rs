@@ -282,3 +282,17 @@ pub fn quote_shell(value: &str) -> String {
     }
     format!("'{}'", value.replace('\'', "'\\''"))
 }
+
+pub fn quote_remote_path(value: &str) -> String {
+    let value = value.trim();
+    if value == "~" {
+        return "~".to_string();
+    }
+    if let Some(rest) = value.strip_prefix("~/") {
+        if rest.is_empty() {
+            return "~".to_string();
+        }
+        return format!("~/{}", quote_shell(rest));
+    }
+    quote_shell(value)
+}

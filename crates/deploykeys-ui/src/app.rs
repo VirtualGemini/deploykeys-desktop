@@ -30,6 +30,13 @@ enum AppSection {
     Keys,
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum SettingsTab {
+    General,
+    KeyStorage,
+    ConfigFile,
+}
+
 const APP_SECTIONS: &[AppSection] = &[AppSection::Repos, AppSection::Connect, AppSection::Keys];
 
 impl AppSection {
@@ -318,6 +325,7 @@ fn Main(
     // header trigger). When open, a full-screen modal overlay with a centered
     // search box + filtered action list appears.
     let palette_open = RwSignal::new(false);
+    let settings_open = RwSignal::new(false);
 
     let mouse_in_sidebar = RwSignal::new(false);
 
@@ -362,8 +370,13 @@ fn Main(
                     <div class="flex items-center gap-1">
                         <LanguageToggle progress=progress pending_count=pending_count />
                         <ThemeToggle />
-                        <QuickRoutesMenu current_section=current_section pending_count=pending_count progress=progress />
-                        <PlaceholderSettingsButton />
+                        <QuickRoutesMenu
+                            current_section=current_section
+                            pending_count=pending_count
+                            progress=progress
+                            on_app_route=Callback::new(move |_| settings_open.set(false))
+                        />
+                        <SettingsButton on_open=Callback::new(move |_| settings_open.set(true)) />
                     </div>
                 </div>
             </header>
@@ -373,20 +386,23 @@ fn Main(
             // Command palette modal (shown when palette_open is true).
             <CommandPalette open=palette_open pending_count=pending_count progress=progress />
 
-            // Body: sidebar (left) + content (right).
-            <div class="flex-1 flex min-h-0">
-                // Left sidebar: vertical section nav at the top, account controls
-                // (sign in / signed-in identity + sign out) pinned to the bottom.
-                <aside class=move || {
-                    if sidebar_collapsed.get() {
-                        "shrink-0 w-[80px] bg-surface flex flex-col overflow-y-auto overflow-x-hidden transition-[width] duration-300 [transition-timing-function:cubic-bezier(0.22,1,0.36,1)]"
-                    } else {
-                        "shrink-0 w-[210px] bg-surface flex flex-col overflow-y-auto overflow-x-hidden transition-[width] duration-300 [transition-timing-function:cubic-bezier(0.22,1,0.36,1)]"
+            // Body: sidebar (left) + content (right). The settings page is
+            // constrained to this area so it slides under, but never over, the
+            // app header.
+            <div class="relative flex-1 min-h-0 overflow-hidden">
+                <div class="flex h-full min-h-0">
+                    // Left sidebar: vertical section nav at the top, account controls
+                    // (sign in / signed-in identity + sign out) pinned to the bottom.
+                    <aside class=move || {
+                        if sidebar_collapsed.get() {
+                            "shrink-0 w-[80px] bg-surface flex flex-col overflow-y-auto overflow-x-hidden transition-[width] duration-300 [transition-timing-function:cubic-bezier(0.22,1,0.36,1)]"
+                        } else {
+                            "shrink-0 w-[210px] bg-surface flex flex-col overflow-y-auto overflow-x-hidden transition-[width] duration-300 [transition-timing-function:cubic-bezier(0.22,1,0.36,1)]"
+                        }
                     }
-                }
-                    on:mouseenter=move |_| mouse_in_sidebar.set(true)
-                    on:mouseleave=move |_| mouse_in_sidebar.set(false)
-                >
+                        on:mouseenter=move |_| mouse_in_sidebar.set(true)
+                        on:mouseleave=move |_| mouse_in_sidebar.set(false)
+                    >
                     <nav class=move || {
                         let base = "flex flex-col gap-1 py-3 pl-2 pr-1 transition-all duration-700";
                         if prompt_sign_in.get() {
@@ -537,37 +553,44 @@ fn Main(
                             },
                         }}
                     </div>
-                </aside>
+                    </aside>
 
-                <SidebarDivider collapsed=sidebar_collapsed on_toggle=sidebar_toggle mouse_in_sidebar=mouse_in_sidebar />
+                    <SidebarDivider collapsed=sidebar_collapsed on_toggle=sidebar_toggle mouse_in_sidebar=mouse_in_sidebar />
 
-                // Right content area: the Repos list (self-manages its data,
-                // gated on the session). Blurs while the sign-in hint is active.
-                <main class=move || {
-                    // No bottom padding: screens are `h-full`, so a screen's own
-                    // bottom bar (e.g. the repos pagination) can sit flush with the
-                    // viewport bottom and line up with the sidebar's account divider.
-                    let base = "flex-1 min-w-0 overflow-y-auto px-8 pt-8 transition-all duration-700";
-                    if prompt_sign_in.get() {
-                        format!("{base} sign-in-hint-soften pointer-events-none")
-                    } else {
-                        base.to_string()
-                    }
-                }>
-                    <div class="max-w-4xl mx-auto h-full">
-                        {move || match current_section.get() {
-                            AppSection::Repos => view! {
-                                <Repos account=account pending_count=pending_count on_sign_in_hint=on_sign_in_hint />
-                            }.into_view(),
-                            AppSection::Connect => view! {
-                                <Connect pending_count=pending_count />
-                            }.into_view(),
-                            AppSection::Keys => view! {
-                                <Keys pending_count=pending_count />
-                            }.into_view(),
-                        }}
-                    </div>
-                </main>
+                    // Right content area: the Repos list (self-manages its data,
+                    // gated on the session). Blurs while the sign-in hint is active.
+                    <main class=move || {
+                        // No bottom padding: screens are `h-full`, so a screen's own
+                        // bottom bar (e.g. the repos pagination) can sit flush with the
+                        // viewport bottom and line up with the sidebar's account divider.
+                        let base = "flex-1 min-w-0 overflow-y-auto px-8 pt-8 transition-all duration-700";
+                        if prompt_sign_in.get() {
+                            format!("{base} sign-in-hint-soften pointer-events-none")
+                        } else {
+                            base.to_string()
+                        }
+                    }>
+                        <div class="max-w-4xl mx-auto h-full">
+                            {move || match current_section.get() {
+                                AppSection::Repos => view! {
+                                    <Repos account=account pending_count=pending_count on_sign_in_hint=on_sign_in_hint />
+                                }.into_view(),
+                                AppSection::Connect => view! {
+                                    <Connect pending_count=pending_count />
+                                }.into_view(),
+                                AppSection::Keys => view! {
+                                    <Keys pending_count=pending_count />
+                                }.into_view(),
+                            }}
+                        </div>
+                    </main>
+                </div>
+
+                <SettingsPage
+                    open=settings_open
+                    progress=progress
+                    on_back=Callback::new(move |_| settings_open.set(false))
+                />
             </div>
 
             // Sign out confirmation dialog
@@ -1087,6 +1110,7 @@ fn QuickRoutesMenu(
     current_section: RwSignal<AppSection>,
     #[allow(unused_variables)] pending_count: RwSignal<usize>,
     progress: ProgressHandle,
+    on_app_route: Callback<()>,
 ) -> impl IntoView {
     let open = RwSignal::new(false);
 
@@ -1122,6 +1146,7 @@ fn QuickRoutesMenu(
                                         on:click=move |_| {
                                             current_section.set(section);
                                             open.set(false);
+                                            on_app_route.call(());
                                         }
                                     >
                                         <Icon name=section.icon() class="size-4" />
@@ -1154,11 +1179,413 @@ fn QuickRoutesMenu(
 }
 
 #[component]
-fn PlaceholderSettingsButton() -> impl IntoView {
+fn SettingsButton(on_open: Callback<()>) -> impl IntoView {
     view! {
-        <IconButton title=move || t("settings.placeholder") on_click=Callback::new(|_| {})>
+        <IconButton title=move || t("settings.title") on_click=on_open>
             <Icon name=IconName::SettingsPlaceholder class="size-4" />
         </IconButton>
+    }
+}
+
+#[component]
+fn SettingsPage(
+    #[prop(into)] open: Signal<bool>,
+    progress: ProgressHandle,
+    on_back: Callback<()>,
+) -> impl IntoView {
+    let active_tab = RwSignal::new(SettingsTab::General);
+
+    view! {
+        <section class=move || {
+            let base = "absolute inset-0 z-40 h-full bg-bg text-content transform-gpu will-change-transform transition-transform duration-500 [transition-timing-function:cubic-bezier(0.16,1,0.3,1)]";
+            if open.get() {
+                format!("{base} translate-x-0")
+            } else {
+                format!("{base} translate-x-full pointer-events-none")
+            }
+        }>
+            <div class="h-full overflow-hidden px-4 sm:px-8 pt-6 pb-8">
+                <div class="max-w-4xl mx-auto flex h-full min-h-0 flex-col">
+                    <div class="shrink-0 flex items-center gap-3">
+                        <button
+                            type="button"
+                            title=move || t("settings.back")
+                            aria-label=move || t("settings.back")
+                            class="shrink-0 flex items-center justify-center size-10 rounded-lg text-content hover:bg-surface hover:text-primary focus:outline-none"
+                            on:click=move |_| on_back.call(())
+                        >
+                            <Icon name=IconName::SettingsBack class="size-6" />
+                        </button>
+                        <h1 class="text-xl font-semibold leading-7 text-content">{move || t("settings.title")}</h1>
+                    </div>
+
+                    <div class="mt-8 grid flex-1 min-h-0 grid-cols-[6rem_minmax(0,1fr)] gap-4 sm:gap-6">
+                        <aside class="min-h-0 overflow-hidden border-r border-border pr-3">
+                            <nav class="flex flex-col gap-1">
+                                <SettingsTabButton
+                                    tab=SettingsTab::General
+                                    active_tab=active_tab
+                                    label=move || t("settings.general")
+                                />
+                                <SettingsTabButton
+                                    tab=SettingsTab::KeyStorage
+                                    active_tab=active_tab
+                                    label=move || t("settings.key_storage")
+                                />
+                                <SettingsTabButton
+                                    tab=SettingsTab::ConfigFile
+                                    active_tab=active_tab
+                                    label=move || t("settings.config_file")
+                                />
+                            </nav>
+                        </aside>
+
+                        <div class="min-h-0 min-w-0 overflow-hidden">
+                            {move || match active_tab.get() {
+                                SettingsTab::General => view! {
+                                    <div class="border-y border-border divide-y divide-border">
+                                        <LanguageSettingRow progress=progress />
+                                        <ThemeSettingRow />
+                                    </div>
+                                }.into_view(),
+                                SettingsTab::KeyStorage => view! {
+                                    <KeyStorageSettingsTab open=open progress=progress />
+                                }.into_view(),
+                                SettingsTab::ConfigFile => view! {
+                                    <ConfigFileSettingsTab open=open progress=progress />
+                                }.into_view(),
+                            }}
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+    }
+}
+
+#[component]
+fn SettingsTabButton(
+    tab: SettingsTab,
+    active_tab: RwSignal<SettingsTab>,
+    #[prop(into)] label: Signal<&'static str>,
+) -> impl IntoView {
+    let active = move || active_tab.get() == tab;
+    view! {
+        <button
+            type="button"
+            class=move || settings_tab_button_class(active())
+            on:click=move |_| active_tab.set(tab)
+        >
+            {move || label.get()}
+        </button>
+    }
+}
+
+fn settings_tab_button_class(active: bool) -> &'static str {
+    if active {
+        "w-full flex h-10 items-center truncate rounded-lg bg-primary-soft px-3 text-sm font-medium text-primary focus:outline-none"
+    } else {
+        "w-full flex h-10 items-center truncate rounded-lg px-3 text-sm font-medium text-muted hover:bg-surface hover:text-content focus:outline-none"
+    }
+}
+
+#[component]
+fn KeyStorageSettingsTab(
+    #[prop(into)] open: Signal<bool>,
+    progress: ProgressHandle,
+) -> impl IntoView {
+    let toast = ToastHandle::expect();
+    let loaded = RwSignal::new(false);
+    let loading = RwSignal::new(false);
+    let saving = RwSignal::new(false);
+    let storage_dir = RwSignal::new(String::new());
+
+    let load_storage_dir = move || {
+        if loading.get_untracked() {
+            return;
+        }
+        loading.set(true);
+        let sim = progress.begin_simulated();
+        spawn_local(async move {
+            match api::get_ssh_key_storage_dir().await {
+                Ok(path) => storage_dir.set(path),
+                Err(e) => toast.error(e),
+            }
+            loading.set(false);
+            progress.end_simulated(&sim);
+        });
+    };
+
+    create_effect(move |_| {
+        if open.get() && !loaded.get_untracked() {
+            loaded.set(true);
+            load_storage_dir();
+        }
+    });
+
+    let choose_directory = move |_| {
+        if saving.get_untracked() {
+            return;
+        }
+        spawn_local(async move {
+            match api::pick_ssh_key_storage_dir().await {
+                Ok(Some(path)) => {
+                    storage_dir.set(path);
+                }
+                Ok(None) => {}
+                Err(e) => toast.error(e),
+            }
+        });
+    };
+
+    let save_directory = move |_| {
+        if saving.get_untracked() {
+            return;
+        }
+        saving.set(true);
+        let path = storage_dir.get_untracked();
+        let sim = progress.begin_simulated();
+        let toast = ToastHandle::expect();
+        spawn_local(async move {
+            match api::set_ssh_key_storage_dir(path).await {
+                Ok(saved) => {
+                    storage_dir.set(saved);
+                    toast.success(t("settings.key_storage_saved"));
+                }
+                Err(e) => toast.error(e),
+            }
+            saving.set(false);
+            progress.end_simulated(&sim);
+        });
+    };
+
+    view! {
+        <div class="max-w-3xl">
+            <div class="flex flex-col gap-3 sm:flex-row sm:items-center">
+                <input
+                    type="text"
+                    prop:value=move || storage_dir.get()
+                    on:input=move |ev| storage_dir.set(event_target_value(&ev))
+                    placeholder=move || t("settings.key_storage_placeholder")
+                    class="min-w-0 flex-1 h-10 px-3 rounded-lg border border-border bg-surface text-sm text-content placeholder:text-muted focus:outline-none focus:border-primary"
+                />
+                <button
+                    type="button"
+                    class="h-10 px-3 rounded-lg border border-border bg-surface text-sm font-medium text-content hover:bg-bg focus:outline-none"
+                    on:click=choose_directory
+                >
+                    {move || t("settings.choose_folder")}
+                </button>
+                <button
+                    type="button"
+                    class="h-10 px-4 rounded-lg bg-primary text-sm font-medium text-on-primary hover:bg-primary-hover focus:outline-none"
+                    on:click=save_directory
+                >
+                    {move || t("settings.save")}
+                </button>
+            </div>
+            <p class="mt-3 text-xs text-muted">{move || t("settings.key_storage_help")}</p>
+        </div>
+    }
+}
+
+#[component]
+fn ConfigFileSettingsTab(
+    #[prop(into)] open: Signal<bool>,
+    progress: ProgressHandle,
+) -> impl IntoView {
+    let toast = ToastHandle::expect();
+    let loaded = RwSignal::new(false);
+    let loading = RwSignal::new(false);
+    let saving = RwSignal::new(false);
+    let config_path = RwSignal::new(String::new());
+    let content = RwSignal::new(String::new());
+    let last_saved = RwSignal::new(String::new());
+
+    let load_config = move || {
+        if loading.get_untracked() {
+            return;
+        }
+        loading.set(true);
+        let sim = progress.begin_simulated();
+        spawn_local(async move {
+            match api::get_ssh_config_file().await {
+                Ok(file) => {
+                    config_path.set(file.path);
+                    last_saved.set(file.content.clone());
+                    content.set(file.content);
+                }
+                Err(e) => toast.error(e),
+            }
+            loading.set(false);
+            progress.end_simulated(&sim);
+        });
+    };
+
+    create_effect(move |_| {
+        if open.get() && !loaded.get_untracked() {
+            loaded.set(true);
+            load_config();
+        }
+    });
+
+    let reload_config = move |_| load_config();
+
+    let save_config = move |_| {
+        if saving.get_untracked() {
+            return;
+        }
+        saving.set(true);
+        let next = content.get_untracked();
+        let sim = progress.begin_simulated();
+        let toast = ToastHandle::expect();
+        spawn_local(async move {
+            match api::save_ssh_config_file(next).await {
+                Ok(file) => {
+                    config_path.set(file.path);
+                    last_saved.set(file.content.clone());
+                    content.set(file.content);
+                    toast.success(t("settings.config_saved"));
+                }
+                Err(e) => toast.error(e),
+            }
+            saving.set(false);
+            progress.end_simulated(&sim);
+        });
+    };
+
+    view! {
+        <div class="flex h-full min-h-0 min-w-0 flex-col overflow-hidden">
+            <div class="shrink-0 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                <div class="min-w-0">
+                    <p class="truncate text-sm text-muted">{move || {
+                        let path = config_path.get();
+                        if path.is_empty() {
+                            t("settings.config_file").to_string()
+                        } else {
+                            path
+                        }
+                    }}</p>
+                </div>
+                <div class="flex items-center gap-2">
+                    <button
+                        type="button"
+                        class="h-9 px-3 rounded-lg border border-border bg-surface text-sm font-medium text-content hover:bg-bg focus:outline-none"
+                        on:click=reload_config
+                    >
+                        {move || t("settings.reload")}
+                    </button>
+                    <button
+                        type="button"
+                        class="h-9 px-4 rounded-lg bg-primary text-sm font-medium text-on-primary hover:bg-primary-hover focus:outline-none"
+                        on:click=save_config
+                    >
+                        {move || t("settings.save")}
+                    </button>
+                </div>
+            </div>
+            <textarea
+                prop:value=move || content.get()
+                on:input=move |ev| content.set(event_target_value(&ev))
+                spellcheck="false"
+                class="mt-4 min-h-0 w-full flex-1 resize-none overflow-auto rounded-lg border border-border bg-surface p-4 font-mono text-xs leading-5 text-content placeholder:text-muted focus:outline-none focus:border-primary [scrollbar-gutter:stable]"
+                placeholder=move || t("settings.config_placeholder")
+            ></textarea>
+        </div>
+    }
+}
+
+#[component]
+fn LanguageSettingRow(progress: ProgressHandle) -> impl IntoView {
+    let locale = i18n::locale();
+    let select = move |next: Locale| {
+        if locale.get_untracked() == next {
+            return;
+        }
+        locale.set(next);
+        let code = next.code();
+        let sim = progress.begin_simulated();
+        let toast = ToastHandle::expect();
+        spawn_local(async move {
+            let _ = api::set_language(code).await;
+            toast.success(t("settings.language_changed"));
+            progress.end_simulated(&sim);
+        });
+    };
+
+    view! {
+        <div class="flex flex-col gap-3 py-5 sm:flex-row sm:items-center sm:justify-between">
+            <div class="min-w-0">
+                <p class="text-sm font-medium text-content">{move || t("settings.language")}</p>
+            </div>
+            <div class="inline-flex w-fit flex-wrap gap-1 rounded-lg border border-border bg-surface p-1">
+                {Locale::ALL.iter().copied().map(|loc| {
+                    let active = move || locale.get() == loc;
+                    view! {
+                        <button
+                            type="button"
+                            class=move || {
+                                if active() {
+                                    "inline-flex h-8 items-center gap-2 rounded-md bg-primary px-3 text-sm font-medium text-on-primary"
+                                } else {
+                                    "inline-flex h-8 items-center gap-2 rounded-md px-3 text-sm font-medium text-muted hover:bg-bg hover:text-content"
+                                }
+                            }
+                            on:click=move |_| select(loc)
+                        >
+                            <span>{loc.native_name()}</span>
+                        </button>
+                    }
+                }).collect_view()}
+            </div>
+        </div>
+    }
+}
+
+#[component]
+fn ThemeSettingRow() -> impl IntoView {
+    let theme_signal = theme::theme();
+
+    view! {
+        <div class="flex flex-col gap-3 py-5 sm:flex-row sm:items-center sm:justify-between">
+            <div class="min-w-0">
+                <p class="text-sm font-medium text-content">{move || t("settings.theme")}</p>
+            </div>
+            <div class="inline-flex w-fit flex-wrap gap-1 rounded-lg border border-border bg-surface p-1">
+                <button
+                    type="button"
+                    class=move || settings_theme_button_class(theme_signal.get() == Theme::System)
+                    on:click=move |_| theme_signal.set(Theme::System)
+                >
+                    <Icon name=IconName::Monitor class="size-4" />
+                    <span>{move || t("settings.theme_system")}</span>
+                </button>
+                <button
+                    type="button"
+                    class=move || settings_theme_button_class(theme_signal.get() == Theme::Light)
+                    on:click=move |_| theme_signal.set(Theme::Light)
+                >
+                    <Icon name=IconName::Sun class="size-4" />
+                    <span>{move || t("settings.theme_light")}</span>
+                </button>
+                <button
+                    type="button"
+                    class=move || settings_theme_button_class(theme_signal.get() == Theme::Dark)
+                    on:click=move |_| theme_signal.set(Theme::Dark)
+                >
+                    <Icon name=IconName::Moon class="size-4" />
+                    <span>{move || t("settings.theme_dark")}</span>
+                </button>
+            </div>
+        </div>
+    }
+}
+
+fn settings_theme_button_class(active: bool) -> &'static str {
+    if active {
+        "inline-flex h-8 items-center gap-2 rounded-md bg-primary px-3 text-sm font-medium text-on-primary"
+    } else {
+        "inline-flex h-8 items-center gap-2 rounded-md px-3 text-sm font-medium text-muted hover:bg-bg hover:text-content"
     }
 }
 

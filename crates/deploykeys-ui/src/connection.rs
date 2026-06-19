@@ -24,6 +24,7 @@ pub struct Connection {
     pub host: Option<String>,
     pub port: Option<u16>,
     pub username: Option<String>,
+    pub auth_method: Option<String>,
     pub key_base_dir: String,
 }
 
@@ -36,6 +37,7 @@ impl Connection {
             host: None,
             port: None,
             username: None,
+            auth_method: None,
             key_base_dir: String::new(),
         }
     }
@@ -53,6 +55,7 @@ impl Connection {
             host: dto.host,
             port: dto.port,
             username: dto.username,
+            auth_method: dto.auth_method,
             key_base_dir: dto.key_base_dir,
         }
     }

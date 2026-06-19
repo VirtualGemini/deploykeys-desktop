@@ -347,6 +347,7 @@ fn ConnectionRow(conn: Connection, on_changed: Callback<()>) -> impl IntoView {
         IconName::Server
     };
     let busy = RwSignal::new(false);
+    let edit_open = RwSignal::new(false);
     let delete_confirm_open = RwSignal::new(false);
 
     let is_connected = {
@@ -394,25 +395,6 @@ fn ConnectionRow(conn: Connection, on_changed: Callback<()>) -> impl IntoView {
                     progress.end_simulated(&sim);
                 });
             }
-        }
-    };
-    let test = {
-        let id = id.clone();
-        move |_| {
-            if busy.get_untracked() {
-                return;
-            }
-            busy.set(true);
-            let sim = progress.begin_simulated();
-            let id = id.clone();
-            spawn_local(async move {
-                match api::test_connection(&id).await {
-                    Ok(_) => toast.success(t("connect.test_success")),
-                    Err(e) => toast.error(e),
-                }
-                busy.set(false);
-                progress.end_simulated(&sim);
-            });
         }
     };
     view! {
@@ -476,11 +458,11 @@ fn ConnectionRow(conn: Connection, on_changed: Callback<()>) -> impl IntoView {
                     </button>
                     <button
                         type="button"
-                        title=move || t("connect.test")
+                        title=move || if is_local { t("connect.local_locked") } else { t("connect.edit") }
                         aria-label=move || t("connect.edit")
                         class="inline-flex items-center justify-center size-8 rounded-md text-content hover:bg-primary-soft dark:hover:bg-primary-soft/60 focus:outline-none disabled:opacity-50 disabled:pointer-events-none"
-                        prop:disabled=move || busy.get()
-                        on:click=test
+                        prop:disabled=move || is_local || busy.get()
+                        on:click=move |_| edit_open.set(true)
                     >
                         <Icon name=IconName::Edit class="size-4" />
                     </button>
@@ -546,6 +528,12 @@ fn ConnectionRow(conn: Connection, on_changed: Callback<()>) -> impl IntoView {
                 </div>
             </div>
         </Show>
+
+        <EditConnectionDialog
+            open=edit_open
+            conn=conn
+            on_updated=on_changed
+        />
     }
 }
 
@@ -577,6 +565,40 @@ fn connection_subtitle(conn: &Connection) -> String {
     }
 }
 
+#[derive(Clone)]
+struct ConnectionTestResult {
+    success: bool,
+    message: String,
+}
+
+fn test_bubble_class(success: bool) -> &'static str {
+    if success {
+        "pointer-events-auto absolute bottom-full left-0 z-[120] mb-2 inline-block max-h-40 w-max max-w-[min(22rem,calc(100vw-3rem))] overflow-y-auto whitespace-normal break-words [overflow-wrap:anywhere] rounded-lg border border-border bg-surface py-2 pl-3 pr-8 text-left text-xs leading-5 text-green-700 shadow-xl dark:text-green-300"
+    } else {
+        "pointer-events-auto absolute bottom-full left-0 z-[120] mb-2 inline-block max-h-40 w-max max-w-[min(22rem,calc(100vw-3rem))] overflow-y-auto whitespace-normal break-words [overflow-wrap:anywhere] rounded-lg border border-border bg-surface py-2 pl-3 pr-8 text-left text-xs leading-5 text-red-700 shadow-xl dark:text-red-300"
+    }
+}
+
+#[component]
+fn ConnectionTestBubble(result: RwSignal<Option<ConnectionTestResult>>) -> impl IntoView {
+    view! {
+        <Show when=move || result.get().is_some()>
+            <span class=move || test_bubble_class(result.get().map(|result| result.success).unwrap_or(false))>
+                <span class="absolute -bottom-1 left-5 size-2 rotate-45 border-b border-r border-border bg-surface"></span>
+                <span>{move || result.get().map(|result| result.message).unwrap_or_default()}</span>
+                <button
+                    type="button"
+                    class="absolute right-1.5 top-1.5 inline-flex size-5 items-center justify-center rounded text-muted hover:bg-bg hover:text-content focus:outline-none focus:ring-1 focus:ring-primary"
+                    aria-label=move || t("palette.close")
+                    on:click=move |_| result.set(None)
+                >
+                    <Icon name=IconName::Close class="size-3.5" />
+                </button>
+            </span>
+        </Show>
+    }
+}
+
 #[component]
 fn AddConnectionDialog(open: RwSignal<bool>, on_created: Callback<()>) -> impl IntoView {
     let progress = ProgressHandle::expect();
@@ -588,7 +610,8 @@ fn AddConnectionDialog(open: RwSignal<bool>, on_created: Callback<()>) -> impl I
     let auth_method = RwSignal::new("password".to_string());
     let auth_secret = RwSignal::new(String::new());
     let submitting = RwSignal::new(false);
-    let error = RwSignal::new(None::<String>);
+    let testing = RwSignal::new(false);
+    let test_result = RwSignal::new(None::<ConnectionTestResult>);
     let auth_options = Signal::derive(move || {
         vec![
             (
@@ -607,9 +630,63 @@ fn AddConnectionDialog(open: RwSignal<bool>, on_created: Callback<()>) -> impl I
             username.set(String::new());
             auth_method.set("password".to_string());
             auth_secret.set(String::new());
-            error.set(None);
+            test_result.set(None);
         }
     });
+
+    let test_connection = move |_| {
+        if submitting.get_untracked() || testing.get_untracked() {
+            return;
+        }
+
+        let host_val = host.get_untracked().trim().to_string();
+        let username_val = username.get_untracked().trim().to_string();
+        let auth_method_val = auth_method.get_untracked();
+        let auth_secret_val = auth_secret.get_untracked().trim().to_string();
+        let port_val = match port.get_untracked().trim().parse::<u16>() {
+            Ok(value) if value > 0 => value,
+            _ => {
+                test_result.set(Some(ConnectionTestResult {
+                    success: false,
+                    message: t("connect.port_invalid").to_string(),
+                }));
+                return;
+            }
+        };
+
+        if host_val.is_empty() || username_val.is_empty() || auth_secret_val.is_empty() {
+            test_result.set(Some(ConnectionTestResult {
+                success: false,
+                message: t("connect.test_required").to_string(),
+            }));
+            return;
+        }
+
+        testing.set(true);
+        test_result.set(None);
+        spawn_local(async move {
+            match api::test_remote_connection_config(
+                None,
+                host_val,
+                port_val,
+                username_val,
+                auth_method_val,
+                auth_secret_val,
+            )
+            .await
+            {
+                Ok(_) => test_result.set(Some(ConnectionTestResult {
+                    success: true,
+                    message: t("connect.test_success").to_string(),
+                })),
+                Err(e) => test_result.set(Some(ConnectionTestResult {
+                    success: false,
+                    message: e,
+                })),
+            }
+            testing.set(false);
+        });
+    };
 
     let submit = move |_| {
         let alias_val = alias.get_untracked().trim().to_string();
@@ -620,7 +697,7 @@ fn AddConnectionDialog(open: RwSignal<bool>, on_created: Callback<()>) -> impl I
         let port_val = match port.get_untracked().trim().parse::<u16>() {
             Ok(value) if value > 0 => value,
             _ => {
-                error.set(Some(t("connect.port_invalid").to_string()));
+                toast.error(t("connect.port_invalid"));
                 return;
             }
         };
@@ -630,12 +707,11 @@ fn AddConnectionDialog(open: RwSignal<bool>, on_created: Callback<()>) -> impl I
             || username_val.is_empty()
             || auth_secret_val.is_empty()
         {
-            error.set(Some(t("connect.remote_required").to_string()));
+            toast.error(t("connect.remote_required"));
             return;
         }
 
         submitting.set(true);
-        error.set(None);
         let sim = progress.begin_simulated();
         spawn_local(async move {
             match api::create_remote_connection(
@@ -653,7 +729,7 @@ fn AddConnectionDialog(open: RwSignal<bool>, on_created: Callback<()>) -> impl I
                     on_created.call(());
                     toast.success(t("connect.create_success"));
                 }
-                Err(e) => error.set(Some(e)),
+                Err(e) => toast.error(e),
             }
             submitting.set(false);
             progress.end_simulated(&sim);
@@ -669,18 +745,13 @@ fn AddConnectionDialog(open: RwSignal<bool>, on_created: Callback<()>) -> impl I
             }
         }>
             <div
-                class="w-full max-w-xl bg-surface border border-border rounded-xl shadow-2xl overflow-hidden"
+                class="w-full max-w-xl bg-surface border border-border rounded-xl shadow-2xl overflow-visible"
                 on:click=|ev| ev.stop_propagation()
             >
                 <div class="px-6 py-5 border-b border-border">
                     <h2 class="text-base font-semibold text-content">{move || t("connect.dialog_title")}</h2>
                 </div>
                 <div class="px-6 py-5 space-y-4">
-                    <Show when=move || error.get().is_some()>
-                        <div class="p-3 text-sm rounded-lg border border-red-200 bg-red-50 text-red-700 dark:border-red-900 dark:bg-red-950 dark:text-red-300">
-                            {move || error.get().unwrap_or_default()}
-                        </div>
-                    </Show>
                     <TextInput label_key="connect.alias" value=alias placeholder_key="connect.alias_placeholder" disabled=submitting />
                     <div class="grid grid-cols-1 sm:grid-cols-5 gap-4">
                         <div class="sm:col-span-4">
@@ -719,26 +790,307 @@ fn AddConnectionDialog(open: RwSignal<bool>, on_created: Callback<()>) -> impl I
                             />
                         }
                     >
-                        <SshKeyFileInput value=auth_secret disabled=submitting error=error />
+                        <SshKeyFileInput value=auth_secret disabled=submitting />
                     </Show>
                 </div>
-                <div class="flex justify-end gap-2 px-6 py-4 border-t border-border">
-                    <button
-                        type="button"
-                        class="px-4 py-2 text-sm font-medium rounded-lg bg-bg text-content hover:text-primary focus:outline-none disabled:opacity-50"
-                        on:click=move |_| open.set(false)
-                        prop:disabled=move || submitting.get()
+                <div class="flex flex-col gap-3 px-6 py-4 border-t border-border sm:flex-row sm:items-center sm:justify-between">
+                    <div class="flex min-w-0 items-center">
+                        <span class="relative inline-flex shrink-0">
+                            <button
+                                type="button"
+                                class="px-3 py-2 text-sm font-medium rounded-lg border border-border bg-bg text-content hover:text-primary focus:outline-none disabled:opacity-50"
+                                on:click=test_connection
+                                prop:disabled=move || submitting.get() || testing.get()
+                            >
+                                {move || if testing.get() { t("connect.testing") } else { t("connect.test") }}
+                            </button>
+                            <ConnectionTestBubble result=test_result />
+                        </span>
+                    </div>
+                    <div class="flex justify-end gap-2">
+                        <button
+                            type="button"
+                            class="px-4 py-2 text-sm font-medium rounded-lg bg-bg text-content hover:text-primary focus:outline-none disabled:opacity-50"
+                            on:click=move |_| open.set(false)
+                            prop:disabled=move || submitting.get()
+                        >
+                            {move || t("common.cancel")}
+                        </button>
+                        <button
+                            type="button"
+                            class="px-4 py-2 text-sm font-medium rounded-lg bg-primary text-on-primary hover:bg-primary-hover focus:outline-none disabled:opacity-50"
+                            on:click=submit
+                            prop:disabled=move || submitting.get()
+                        >
+                            {move || if submitting.get() { t("connect.creating") } else { t("connect.create") }}
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    }
+}
+
+#[component]
+fn EditConnectionDialog(
+    open: RwSignal<bool>,
+    conn: Connection,
+    on_updated: Callback<()>,
+) -> impl IntoView {
+    let progress = ProgressHandle::expect();
+    let toast = ToastHandle::expect();
+    let conn_id = conn.id.clone();
+    let initial_auth_method = conn
+        .auth_method
+        .clone()
+        .unwrap_or_else(|| "password".to_string());
+    let alias = RwSignal::new(String::new());
+    let host = RwSignal::new(String::new());
+    let port = RwSignal::new("22".to_string());
+    let username = RwSignal::new(String::new());
+    let auth_method = RwSignal::new(initial_auth_method.clone());
+    let auth_secret = RwSignal::new(String::new());
+    let submitting = RwSignal::new(false);
+    let testing = RwSignal::new(false);
+    let test_result = RwSignal::new(None::<ConnectionTestResult>);
+    let auth_options = Signal::derive(move || {
+        vec![
+            (
+                "password".to_string(),
+                t("connect.auth_password").to_string(),
+            ),
+            ("ssh_key".to_string(), t("connect.auth_ssh_key").to_string()),
+        ]
+    });
+
+    create_effect({
+        let conn = conn.clone();
+        let initial_auth_method = initial_auth_method.clone();
+        move |_| {
+            if open.get() {
+                alias.set(conn.alias.clone());
+                host.set(conn.host.clone().unwrap_or_default());
+                port.set(conn.port.unwrap_or(22).to_string());
+                username.set(conn.username.clone().unwrap_or_default());
+                auth_method.set(initial_auth_method.clone());
+                auth_secret.set(String::new());
+                test_result.set(None);
+            }
+        }
+    });
+
+    let test_connection = {
+        let initial_auth_method = initial_auth_method.clone();
+        let conn_id = conn_id.clone();
+        move |_| {
+            if submitting.get_untracked() || testing.get_untracked() {
+                return;
+            }
+
+            let host_val = host.get_untracked().trim().to_string();
+            let username_val = username.get_untracked().trim().to_string();
+            let auth_method_val = auth_method.get_untracked();
+            let auth_secret_val = auth_secret.get_untracked().trim().to_string();
+            let port_val = match port.get_untracked().trim().parse::<u16>() {
+                Ok(value) if value > 0 => value,
+                _ => {
+                    test_result.set(Some(ConnectionTestResult {
+                        success: false,
+                        message: t("connect.port_invalid").to_string(),
+                    }));
+                    return;
+                }
+            };
+
+            if host_val.is_empty() || username_val.is_empty() {
+                test_result.set(Some(ConnectionTestResult {
+                    success: false,
+                    message: t("connect.test_required_edit").to_string(),
+                }));
+                return;
+            }
+            if auth_method_val != initial_auth_method && auth_secret_val.is_empty() {
+                test_result.set(Some(ConnectionTestResult {
+                    success: false,
+                    message: t("connect.auth_secret_required").to_string(),
+                }));
+                return;
+            }
+
+            testing.set(true);
+            test_result.set(None);
+            let conn_id = conn_id.clone();
+            spawn_local(async move {
+                match api::test_remote_connection_config(
+                    Some(conn_id),
+                    host_val,
+                    port_val,
+                    username_val,
+                    auth_method_val,
+                    auth_secret_val,
+                )
+                .await
+                {
+                    Ok(_) => test_result.set(Some(ConnectionTestResult {
+                        success: true,
+                        message: t("connect.test_success").to_string(),
+                    })),
+                    Err(e) => test_result.set(Some(ConnectionTestResult {
+                        success: false,
+                        message: e,
+                    })),
+                }
+                testing.set(false);
+            });
+        }
+    };
+
+    let submit = {
+        let initial_auth_method = initial_auth_method.clone();
+        move |_| {
+            let alias_val = alias.get_untracked().trim().to_string();
+            let host_val = host.get_untracked().trim().to_string();
+            let username_val = username.get_untracked().trim().to_string();
+            let auth_method_val = auth_method.get_untracked();
+            let auth_secret_val = auth_secret.get_untracked().trim().to_string();
+            let port_val = match port.get_untracked().trim().parse::<u16>() {
+                Ok(value) if value > 0 => value,
+                _ => {
+                    toast.error(t("connect.port_invalid"));
+                    return;
+                }
+            };
+
+            if alias_val.is_empty() || host_val.is_empty() || username_val.is_empty() {
+                toast.error(t("connect.edit_required"));
+                return;
+            }
+            if auth_method_val != initial_auth_method && auth_secret_val.is_empty() {
+                toast.error(t("connect.auth_secret_required"));
+                return;
+            }
+
+            submitting.set(true);
+            let sim = progress.begin_simulated();
+            let conn_id = conn_id.clone();
+            spawn_local(async move {
+                match api::update_remote_connection(
+                    conn_id,
+                    alias_val,
+                    host_val,
+                    port_val,
+                    username_val,
+                    auth_method_val,
+                    auth_secret_val,
+                )
+                .await
+                {
+                    Ok(_) => {
+                        open.set(false);
+                        on_updated.call(());
+                        toast.success(t("connect.update_success"));
+                    }
+                    Err(e) => toast.error(e),
+                }
+                submitting.set(false);
+                progress.end_simulated(&sim);
+            });
+        }
+    };
+
+    view! {
+        <div class=move || {
+            if open.get() {
+                "fixed inset-0 z-[100] bg-black/50 backdrop-blur-sm flex items-center justify-center px-4 opacity-100 transition-opacity duration-300"
+            } else {
+                "fixed inset-0 z-[100] bg-black/50 backdrop-blur-sm flex items-center justify-center px-4 opacity-0 pointer-events-none transition-opacity duration-300"
+            }
+        }>
+            <div
+                class="w-full max-w-xl bg-surface border border-border rounded-xl shadow-2xl overflow-visible"
+                on:click=|ev| ev.stop_propagation()
+            >
+                <div class="px-6 py-5 border-b border-border">
+                    <h2 class="text-base font-semibold text-content">{move || t("connect.dialog_title_edit")}</h2>
+                </div>
+                <div class="px-6 py-5 space-y-4">
+                    <TextInput label_key="connect.alias" value=alias placeholder_key="connect.alias_placeholder" disabled=submitting />
+                    <div class="grid grid-cols-1 sm:grid-cols-5 gap-4">
+                        <div class="sm:col-span-4">
+                            <TextInput label_key="connect.host" value=host placeholder_key="connect.host_placeholder" disabled=submitting />
+                        </div>
+                        <div class="sm:col-span-1">
+                            <TextInput label_key="connect.port" value=port placeholder_key="connect.port_placeholder" disabled=submitting />
+                        </div>
+                    </div>
+                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                        <TextInput label_key="connect.username" value=username placeholder_key="connect.username_placeholder" disabled=submitting />
+                        <div class="min-w-0">
+                            <label class="block text-sm font-medium text-content mb-1.5">{move || t("connect.auth_method")}</label>
+                            <FormSelectDropdown
+                                options=auth_options
+                                selected=Signal::derive(move || auth_method.get())
+                                on_select=Callback::new(move |value| {
+                                    if auth_method.get_untracked() != value {
+                                        auth_method.set(value);
+                                        auth_secret.set(String::new());
+                                    }
+                                })
+                                disabled=Signal::derive(move || submitting.get())
+                            />
+                        </div>
+                    </div>
+                    <Show
+                        when=move || auth_method.get() == "ssh_key"
+                        fallback=move || view! {
+                            <TextInput
+                                label_key="connect.password"
+                                value=auth_secret
+                                placeholder_key="connect.auth_secret_keep_placeholder"
+                                input_type="password"
+                                disabled=submitting
+                            />
+                        }
                     >
-                        {move || t("common.cancel")}
-                    </button>
-                    <button
-                        type="button"
-                        class="px-4 py-2 text-sm font-medium rounded-lg bg-primary text-on-primary hover:bg-primary-hover focus:outline-none disabled:opacity-50"
-                        on:click=submit
-                        prop:disabled=move || submitting.get()
-                    >
-                        {move || if submitting.get() { t("connect.creating") } else { t("connect.create") }}
-                    </button>
+                        <SshKeyFileInput
+                            value=auth_secret
+                            disabled=submitting
+                            placeholder_key="connect.auth_secret_keep_placeholder"
+                        />
+                    </Show>
+                </div>
+                <div class="flex flex-col gap-3 px-6 py-4 border-t border-border sm:flex-row sm:items-center sm:justify-between">
+                    <div class="flex min-w-0 items-center">
+                        <span class="relative inline-flex shrink-0">
+                            <button
+                                type="button"
+                                class="px-3 py-2 text-sm font-medium rounded-lg border border-border bg-bg text-content hover:text-primary focus:outline-none disabled:opacity-50"
+                                on:click=test_connection
+                                prop:disabled=move || submitting.get() || testing.get()
+                            >
+                                {move || if testing.get() { t("connect.testing") } else { t("connect.test") }}
+                            </button>
+                            <ConnectionTestBubble result=test_result />
+                        </span>
+                    </div>
+                    <div class="flex justify-end gap-2">
+                        <button
+                            type="button"
+                            class="px-4 py-2 text-sm font-medium rounded-lg bg-bg text-content hover:text-primary focus:outline-none disabled:opacity-50"
+                            on:click=move |_| open.set(false)
+                            prop:disabled=move || submitting.get()
+                        >
+                            {move || t("common.cancel")}
+                        </button>
+                        <button
+                            type="button"
+                            class="px-4 py-2 text-sm font-medium rounded-lg bg-primary text-on-primary hover:bg-primary-hover focus:outline-none disabled:opacity-50"
+                            on:click=submit
+                            prop:disabled=move || submitting.get()
+                        >
+                            {move || if submitting.get() { t("connect.saving") } else { t("connect.save") }}
+                        </button>
+                    </div>
                 </div>
             </div>
         </div>
@@ -749,8 +1101,10 @@ fn AddConnectionDialog(open: RwSignal<bool>, on_created: Callback<()>) -> impl I
 fn SshKeyFileInput(
     value: RwSignal<String>,
     disabled: RwSignal<bool>,
-    error: RwSignal<Option<String>>,
+    #[prop(into, default = MaybeSignal::Static("connect.private_key_path_placeholder"))]
+    placeholder_key: MaybeSignal<&'static str>,
 ) -> impl IntoView {
+    let toast = ToastHandle::expect();
     let choose_file = move |_| {
         if disabled.get_untracked() {
             return;
@@ -759,7 +1113,7 @@ fn SshKeyFileInput(
             match api::pick_ssh_private_key().await {
                 Ok(Some(path)) => value.set(path),
                 Ok(None) => {}
-                Err(e) => error.set(Some(e)),
+                Err(e) => toast.error(e),
             }
         });
     };
@@ -771,7 +1125,7 @@ fn SshKeyFileInput(
                 <input
                     type="text"
                     class="min-w-0 flex-1 py-2 px-3 text-sm rounded-lg border border-border bg-bg text-content placeholder:text-muted focus:outline-none font-mono"
-                    placeholder=move || t("connect.private_key_path_placeholder")
+                    placeholder=move || t(placeholder_key.get())
                     prop:value=move || value.get()
                     prop:readonly=true
                     prop:disabled=move || disabled.get()

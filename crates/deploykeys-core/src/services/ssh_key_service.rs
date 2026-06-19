@@ -3,8 +3,8 @@ use crate::{
     keygen::local::LocalKeyGenerator,
     models::{KeyAlgorithm, SshKey, Target, TargetType},
     ssh::{
-        dirname_remote_path, join_remote_path, quote_shell, remote_private_key_path,
-        run_remote_command,
+        dirname_remote_path, join_remote_path, quote_remote_path, quote_shell,
+        remote_private_key_path, run_remote_command,
     },
     Error, Result,
 };
@@ -28,7 +28,8 @@ impl SshKeyService {
 
     /// Generate a new SSH key pair in an isolated directory.
     ///
-    /// Keys are stored in `~/.ssh/deploykeys/<directory>/id_<algorithm>`.
+    /// Keys are stored in the local target's configured key base directory,
+    /// under `<directory>/id_<algorithm>`.
     /// The `directory` must be ASCII-safe (no spaces, only alphanumeric + dash/underscore).
     ///
     /// The key is associated with the Phase-1 local target, which is created on
@@ -68,7 +69,7 @@ impl SshKeyService {
 
         match target.target_type {
             TargetType::Local => {
-                self.create_local_key_for_target(target.id, directory, algorithm, comment, remark)
+                self.create_local_key_for_target(&target, directory, algorithm, comment, remark)
                     .await
             }
             TargetType::Remote => {
@@ -80,7 +81,7 @@ impl SshKeyService {
 
     async fn create_local_key_for_target(
         &self,
-        target_id: i64,
+        target: &Target,
         directory: String,
         algorithm: KeyAlgorithm,
         comment: String,
@@ -118,7 +119,7 @@ impl SshKeyService {
         if self
             .db
             .ssh_keys()
-            .find_by_directory_and_target(&directory, target_id)
+            .find_by_directory_and_target(&directory, target.id)
             .await?
             .is_some()
         {
@@ -128,10 +129,19 @@ impl SshKeyService {
             )));
         }
 
-        // Resolve base directory: ~/.ssh/deploykeys/<directory>/
-        let base_dir = resolve_ssh_keys_base_dir()?;
+        let base_dir = expand_local_key_base_dir(&target.key_base_dir)?;
+        tokio::fs::create_dir_all(&base_dir).await?;
         let key_dir = base_dir.join(&directory);
-        tokio::fs::create_dir_all(&key_dir).await?;
+        match tokio::fs::create_dir(&key_dir).await {
+            Ok(()) => {}
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
+                return Err(Error::AlreadyExists(format!(
+                    "Directory already exists: {}",
+                    display_local_path(&key_dir)
+                )));
+            }
+            Err(e) => return Err(Error::Io(e)),
+        }
 
         #[cfg(unix)]
         {
@@ -149,11 +159,21 @@ impl SshKeyService {
         let gen_algorithm = algorithm.clone();
         let gen_path = private_key_path.clone();
         let gen_comment = comment.clone();
-        let key_pair = tokio::task::spawn_blocking(move || {
+        let key_pair = match tokio::task::spawn_blocking(move || {
             LocalKeyGenerator::generate(gen_algorithm, &gen_path, &gen_comment)
         })
         .await
-        .map_err(|e| Error::Other(format!("Key generation task failed: {}", e)))??;
+        {
+            Ok(Ok(key_pair)) => key_pair,
+            Ok(Err(e)) => {
+                let _ = tokio::fs::remove_dir(&key_dir).await;
+                return Err(e);
+            }
+            Err(e) => {
+                let _ = tokio::fs::remove_dir(&key_dir).await;
+                return Err(Error::Other(format!("Key generation task failed: {}", e)));
+            }
+        };
 
         let public_key_path = private_key_path.with_extension("pub");
 
@@ -167,7 +187,7 @@ impl SshKeyService {
             public_key_path: public_key_path.to_string_lossy().to_string(),
             comment,
             remark: remark.trim().to_string(),
-            target_id,
+            target_id: target.id,
             created_at: Utc::now(),
         };
 
@@ -214,10 +234,10 @@ impl SshKeyService {
              chmod 644 {public_key}; \
              printf '%s\\n' \"$(cat {public_key})\"; \
              ssh-keygen -l -E sha256 -f {public_key} | awk '{{print $2}}'",
-            base = quote_shell(&target.key_base_dir),
-            key_dir = quote_shell(&key_dir),
-            private_key = quote_shell(&private_key_path),
-            public_key = quote_shell(&public_key_path),
+            base = quote_remote_path(&target.key_base_dir),
+            key_dir = quote_remote_path(&key_dir),
+            private_key = quote_remote_path(&private_key_path),
+            public_key = quote_remote_path(&public_key_path),
         );
         let output = run_remote_command(target, &command).await?;
         let mut lines = output.stdout.lines().filter(|line| !line.trim().is_empty());
@@ -280,7 +300,7 @@ impl SshKeyService {
             if target.target_type == TargetType::Remote {
                 let output = run_remote_command(
                     &target,
-                    &format!("cat {}", quote_shell(&key.public_key_path)),
+                    &format!("cat {}", quote_remote_path(&key.public_key_path)),
                 )
                 .await?;
                 return Ok(output.stdout);
@@ -312,9 +332,9 @@ impl SshKeyService {
                 let parent = dirname_remote_path(&key.private_key_path).unwrap_or_default();
                 let command = format!(
                     "rm -f {private_key} {public_key}; rmdir {parent} 2>/dev/null || true",
-                    private_key = quote_shell(&key.private_key_path),
-                    public_key = quote_shell(&key.public_key_path),
-                    parent = quote_shell(&parent),
+                    private_key = quote_remote_path(&key.private_key_path),
+                    public_key = quote_remote_path(&key.public_key_path),
+                    parent = quote_remote_path(&parent),
                 );
                 let _ = run_remote_command(target, &command).await;
             }
@@ -483,7 +503,6 @@ impl SshKeyService {
             return Ok(existing.id);
         }
 
-        let key_base_dir = resolve_ssh_keys_base_dir()?;
         let target = crate::models::Target {
             id: 0,
             target_type: crate::models::TargetType::Local,
@@ -494,7 +513,7 @@ impl SshKeyService {
             username: None,
             auth_method: None,
             auth_ref: None,
-            key_base_dir: key_base_dir.to_string_lossy().to_string(),
+            key_base_dir: "~/.ssh/deploykeys".to_string(),
             status: crate::models::TargetStatus::Active,
             host_key_fingerprint: None,
             created_at: Utc::now(),
@@ -521,6 +540,43 @@ fn resolve_ssh_keys_base_dir() -> Result<PathBuf> {
     Ok(home.join(".ssh").join("deploykeys"))
 }
 
+fn expand_local_key_base_dir(value: &str) -> Result<PathBuf> {
+    let value = value.trim();
+    if value.is_empty() {
+        return resolve_ssh_keys_base_dir();
+    }
+
+    let path = if value == "~" {
+        dirs::home_dir().ok_or_else(|| Error::Other("Could not find home directory".into()))?
+    } else if let Some(rest) = value.strip_prefix("~/") {
+        dirs::home_dir()
+            .ok_or_else(|| Error::Other("Could not find home directory".into()))?
+            .join(rest)
+    } else {
+        PathBuf::from(value)
+    };
+
+    if path.is_absolute() {
+        Ok(path)
+    } else {
+        Err(Error::Validation(
+            "Local SSH key storage directory must be absolute or start with ~/".into(),
+        ))
+    }
+}
+
+fn display_local_path(path: &Path) -> String {
+    if let Some(home) = dirs::home_dir() {
+        if path == home {
+            return "~".to_string();
+        }
+        if let Ok(rest) = path.strip_prefix(&home) {
+            return format!("~/{}", rest.to_string_lossy());
+        }
+    }
+    path.display().to_string()
+}
+
 async fn key_files_exist(key: &SshKey) -> bool {
     let private_path = Path::new(&key.private_key_path);
     let public_path = Path::new(&key.public_key_path);
@@ -542,11 +598,11 @@ impl SshKeyService {
             if target.target_type == TargetType::Remote {
                 let command = format!(
                     "test -d {dir} && test -f {private_key} && test -f {public_key}",
-                    dir = quote_shell(
+                    dir = quote_remote_path(
                         &dirname_remote_path(&key.private_key_path).unwrap_or_default()
                     ),
-                    private_key = quote_shell(&key.private_key_path),
-                    public_key = quote_shell(&key.public_key_path),
+                    private_key = quote_remote_path(&key.private_key_path),
+                    public_key = quote_remote_path(&key.public_key_path),
                 );
                 run_remote_command(&target, &command).await?;
                 return Ok(());
@@ -603,8 +659,8 @@ impl SshKeyService {
 
         let command = format!(
             "test ! -e {new_dir}; mv {old_dir} {new_dir}",
-            old_dir = quote_shell(&old_dir),
-            new_dir = quote_shell(&new_dir),
+            old_dir = quote_remote_path(&old_dir),
+            new_dir = quote_remote_path(&new_dir),
         );
         run_remote_command(target, &command).await?;
 
@@ -622,8 +678,8 @@ impl SshKeyService {
         {
             let rollback = format!(
                 "test ! -e {old_dir}; mv {new_dir} {old_dir}",
-                old_dir = quote_shell(&old_dir),
-                new_dir = quote_shell(&new_dir),
+                old_dir = quote_remote_path(&old_dir),
+                new_dir = quote_remote_path(&new_dir),
             );
             let _ = run_remote_command(target, &rollback).await;
             return Err(e);
@@ -708,10 +764,11 @@ fn remote_keygen_args(algorithm: &KeyAlgorithm, comment: &str, private_key_path:
         "-C".to_string(),
         comment.to_string(),
         "-f".to_string(),
-        private_key_path.to_string(),
     ]);
-    args.into_iter()
+    let mut parts = args
+        .into_iter()
         .map(|arg| quote_shell(&arg))
-        .collect::<Vec<_>>()
-        .join(" ")
+        .collect::<Vec<_>>();
+    parts.push(quote_remote_path(private_key_path));
+    parts.join(" ")
 }

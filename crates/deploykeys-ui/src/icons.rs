@@ -26,6 +26,7 @@ pub enum IconName {
     Power,
     QuickRoutes,
     Server,
+    SettingsBack,
     SettingsPlaceholder,
     SignOut,
     SidebarToggle,
@@ -55,6 +56,7 @@ impl IconName {
             IconName::Power => "assets/images/svg/icons/power.svg",
             IconName::QuickRoutes => "assets/images/svg/icons/quick-routes.svg",
             IconName::Server => "assets/images/svg/icons/server.svg",
+            IconName::SettingsBack => "assets/images/svg/icons/settings-back.svg",
             IconName::SettingsPlaceholder => "assets/images/svg/icons/settings-placeholder.svg",
             IconName::SignOut => "assets/images/svg/icons/sign-out.svg",
             IconName::SidebarToggle => "assets/images/svg/icons/sidebar-toggle.svg",
@@ -84,6 +86,7 @@ impl IconName {
             IconName::Power => include_str!("../assets/images/svg/icons/power.svg"),
             IconName::QuickRoutes => include_str!("../assets/images/svg/icons/quick-routes.svg"),
             IconName::Server => include_str!("../assets/images/svg/icons/server.svg"),
+            IconName::SettingsBack => include_str!("../assets/images/svg/icons/settings-back.svg"),
             IconName::SettingsPlaceholder => {
                 include_str!("../assets/images/svg/icons/settings-placeholder.svg")
             }
