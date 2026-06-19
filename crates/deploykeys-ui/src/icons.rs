@@ -32,6 +32,7 @@ pub enum IconName {
     SidebarToggle,
     SidebarToggleFilled,
     Sun,
+    TutorialHelp,
 }
 
 impl IconName {
@@ -62,6 +63,7 @@ impl IconName {
             IconName::SidebarToggle => "assets/images/svg/icons/sidebar-toggle.svg",
             IconName::SidebarToggleFilled => "assets/images/svg/icons/sidebar-toggle-filled.svg",
             IconName::Sun => "assets/images/svg/icons/sun.svg",
+            IconName::TutorialHelp => "assets/images/svg/icons/tutorial-help.svg",
         }
     }
 
@@ -98,6 +100,7 @@ impl IconName {
                 include_str!("../assets/images/svg/icons/sidebar-toggle-filled.svg")
             }
             IconName::Sun => include_str!("../assets/images/svg/icons/sun.svg"),
+            IconName::TutorialHelp => include_str!("../assets/images/svg/icons/tutorial-help.svg"),
         }
     }
 }

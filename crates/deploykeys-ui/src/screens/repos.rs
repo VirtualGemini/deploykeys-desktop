@@ -410,6 +410,7 @@ pub fn Repos(
                     // Always visible: when signed out, clicking it spotlights sign-in.
                     <button
                         type="button"
+                        data-tutorial-target="sync-repos"
                         class="py-2 px-4 text-sm font-medium rounded-lg border border-border bg-primary-soft text-primary hover:opacity-80 focus:outline-none transition-opacity disabled:opacity-50"
                         prop:disabled=move || syncing.get()
                         on:click=move |_| sync()
@@ -587,6 +588,7 @@ pub fn Repos(
                                                                         <div class="inline-flex min-w-max items-center gap-1.5">
                                                                             <button
                                                                                 type="button"
+                                                                                data-tutorial-target="clone-repo"
                                                                                 title=move || if has_connection.get() { t("repos.clone_repository").to_string() } else { t("connect.required_hint").to_string() }
                                                                                 aria-label=move || t("repos.clone_repository")
                                                                                 class=move || {
@@ -606,6 +608,7 @@ pub fn Repos(
                                                                             </button>
                                                                             <button
                                                                                 type="button"
+                                                                                data-tutorial-target="bind-key"
                                                                                 title=move || if has_connection.get() { t("repos.bind_key").to_string() } else { t("connect.required_hint").to_string() }
                                                                                 aria-label=move || t("repos.bind_key")
                                                                                 class="inline-flex items-center justify-center size-8 rounded-md text-content hover:bg-primary-soft dark:hover:bg-primary-soft/60 focus:outline-none disabled:opacity-50 disabled:pointer-events-none"
@@ -617,6 +620,7 @@ pub fn Repos(
                                                                             <button
                                                                                 type="button"
                                                                                 data-more-actions-button=""
+                                                                                data-tutorial-target="repository-more-actions"
                                                                                 title=move || if has_connection.get() { t("repos.more_actions").to_string() } else { t("connect.required_hint").to_string() }
                                                                                 aria-label=move || t("repos.more_actions")
                                                                                 class="inline-flex items-center justify-center size-8 rounded-md text-content hover:bg-primary-soft dark:hover:bg-primary-soft/60 focus:outline-none disabled:opacity-50 disabled:pointer-events-none"

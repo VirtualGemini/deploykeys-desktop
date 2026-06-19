@@ -15,6 +15,7 @@ use crate::tauri;
 use crate::theme::{self, Theme};
 use crate::toast::{ToastHandle, ToastViewport};
 use leptos::*;
+use wasm_bindgen::JsCast;
 use wasm_bindgen_futures::spawn_local;
 
 #[derive(Clone, PartialEq)]
@@ -31,6 +32,18 @@ enum AppSection {
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
+enum TutorialStep {
+    SignIn,
+    Sync,
+    Connect,
+    CreateKey,
+    BindKey,
+    CloneRepo,
+    ConnectRepo,
+    TestRepo,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
 enum SettingsTab {
     General,
     KeyStorage,
@@ -38,6 +51,17 @@ enum SettingsTab {
 }
 
 const APP_SECTIONS: &[AppSection] = &[AppSection::Repos, AppSection::Connect, AppSection::Keys];
+const TUTORIAL_STEPS: &[TutorialStep] = &[
+    TutorialStep::SignIn,
+    TutorialStep::Sync,
+    TutorialStep::Connect,
+    TutorialStep::CreateKey,
+    TutorialStep::BindKey,
+    TutorialStep::CloneRepo,
+    TutorialStep::ConnectRepo,
+    TutorialStep::TestRepo,
+];
+const TUTORIAL_STORAGE_KEY: &str = "deploykeys.beginner_tutorial_seen";
 
 impl AppSection {
     const fn label_key(self) -> &'static str {
@@ -55,6 +79,86 @@ impl AppSection {
             AppSection::Keys => IconName::Key,
         }
     }
+}
+
+impl TutorialStep {
+    fn index(self) -> usize {
+        TUTORIAL_STEPS
+            .iter()
+            .position(|step| *step == self)
+            .unwrap_or(0)
+    }
+
+    const fn section(self) -> AppSection {
+        match self {
+            TutorialStep::SignIn
+            | TutorialStep::Sync
+            | TutorialStep::BindKey
+            | TutorialStep::CloneRepo
+            | TutorialStep::ConnectRepo
+            | TutorialStep::TestRepo => AppSection::Repos,
+            TutorialStep::Connect => AppSection::Connect,
+            TutorialStep::CreateKey => AppSection::Keys,
+        }
+    }
+
+    const fn icon(self) -> IconName {
+        match self {
+            TutorialStep::SignIn => IconName::Github,
+            TutorialStep::Sync | TutorialStep::CloneRepo => IconName::Download,
+            TutorialStep::Connect | TutorialStep::ConnectRepo | TutorialStep::TestRepo => {
+                IconName::Server
+            }
+            TutorialStep::CreateKey | TutorialStep::BindKey => IconName::Key,
+        }
+    }
+
+    const fn title_key(self) -> &'static str {
+        match self {
+            TutorialStep::SignIn => "tutorial.signin.title",
+            TutorialStep::Sync => "tutorial.sync.title",
+            TutorialStep::Connect => "tutorial.connect.title",
+            TutorialStep::CreateKey => "tutorial.create_key.title",
+            TutorialStep::BindKey => "tutorial.bind_key.title",
+            TutorialStep::CloneRepo => "tutorial.clone_repo.title",
+            TutorialStep::ConnectRepo => "tutorial.connect_repo.title",
+            TutorialStep::TestRepo => "tutorial.test_repo.title",
+        }
+    }
+
+    const fn body_key(self) -> &'static str {
+        match self {
+            TutorialStep::SignIn => "tutorial.signin.body",
+            TutorialStep::Sync => "tutorial.sync.body",
+            TutorialStep::Connect => "tutorial.connect.body",
+            TutorialStep::CreateKey => "tutorial.create_key.body",
+            TutorialStep::BindKey => "tutorial.bind_key.body",
+            TutorialStep::CloneRepo => "tutorial.clone_repo.body",
+            TutorialStep::ConnectRepo => "tutorial.connect_repo.body",
+            TutorialStep::TestRepo => "tutorial.test_repo.body",
+        }
+    }
+
+    const fn target_selector(self) -> &'static str {
+        match self {
+            TutorialStep::SignIn => "[data-tutorial-target='sign-in']",
+            TutorialStep::Sync => "[data-tutorial-target='sync-repos']",
+            TutorialStep::Connect => "[data-tutorial-target='connect-environment']",
+            TutorialStep::CreateKey => "[data-tutorial-target='create-key']",
+            TutorialStep::BindKey => "[data-tutorial-target='bind-key']",
+            TutorialStep::CloneRepo => "[data-tutorial-target='clone-repo']",
+            TutorialStep::ConnectRepo => "[data-tutorial-target='connect-repo']",
+            TutorialStep::TestRepo => "[data-tutorial-target='test-repo']",
+        }
+    }
+}
+
+#[derive(Clone, Copy)]
+struct TutorialTargetRect {
+    top: f64,
+    left: f64,
+    width: f64,
+    height: f64,
 }
 
 const SIDEBAR_AUTO_COLLAPSE_WIDTH: f64 = 840.0;
@@ -330,6 +434,14 @@ fn Main(
     // search box + filtered action list appears.
     let palette_open = RwSignal::new(false);
     let settings_open = RwSignal::new(false);
+    let tutorial_step =
+        RwSignal::new(should_start_beginner_tutorial().then_some(TutorialStep::SignIn));
+
+    create_effect(move |_| {
+        if let Some(step) = tutorial_step.get() {
+            current_section.set(step.section());
+        }
+    });
 
     let mouse_in_sidebar = RwSignal::new(false);
 
@@ -372,6 +484,12 @@ fn Main(
                 <div class="flex items-center gap-3">
                     <CommandPaletteTrigger on_open=Callback::new(move |_| palette_open.set(true)) />
                     <div class="flex items-center gap-1">
+                        <IconButton
+                            title=Signal::derive(move || t("tutorial.open"))
+                            on_click=Callback::new(move |_| tutorial_step.set(Some(TutorialStep::SignIn)))
+                        >
+                            <Icon name=IconName::TutorialHelp class="size-4" />
+                        </IconButton>
                         <LanguageToggle progress=progress />
                         <ThemeToggle />
                         <QuickRoutesMenu
@@ -511,6 +629,7 @@ fn Main(
                                         // Collapsed: icon only button
                                         <button
                                             type="button"
+                                            data-tutorial-target="sign-in"
                                             title=move || t("welcome.sign_in")
                                             class=move || {
                                                 let hinted = if prompt_sign_in.get() { " sign-in-button-hover" } else { "" };
@@ -533,6 +652,7 @@ fn Main(
                                         // Expanded: ghost button with text
                                         <button
                                             type="button"
+                                            data-tutorial-target="sign-in"
                                             title=move || t("welcome.sign_in")
                                             class=move || {
                                                 let hinted = if prompt_sign_in.get() { " sign-in-button-hover border-transparent" } else { "" };
@@ -575,16 +695,20 @@ fn Main(
                         }
                     }>
                         <div class="max-w-4xl mx-auto h-full">
-                            {move || match current_section.get() {
-                                AppSection::Repos => view! {
-                                    <Repos account=account pending_count=pending_count on_sign_in_hint=on_sign_in_hint />
-                                }.into_view(),
-                                AppSection::Connect => view! {
-                                    <Connect pending_count=pending_count />
-                                }.into_view(),
-                                AppSection::Keys => view! {
-                                    <Keys pending_count=pending_count />
-                                }.into_view(),
+                            {move || if let Some(step) = tutorial_step.get() {
+                                view! { <TutorialDemoScreen step=step /> }.into_view()
+                            } else {
+                                match current_section.get() {
+                                    AppSection::Repos => view! {
+                                        <Repos account=account pending_count=pending_count on_sign_in_hint=on_sign_in_hint />
+                                    }.into_view(),
+                                    AppSection::Connect => view! {
+                                        <Connect pending_count=pending_count />
+                                    }.into_view(),
+                                    AppSection::Keys => view! {
+                                        <Keys pending_count=pending_count />
+                                    }.into_view(),
+                                }
                             }}
                         </div>
                     </main>
@@ -595,6 +719,7 @@ fn Main(
                     progress=progress
                     on_back=Callback::new(move |_| settings_open.set(false))
                 />
+                <TutorialGuide step=tutorial_step current_section=current_section />
             </div>
 
             // Sign out confirmation dialog
@@ -633,6 +758,561 @@ fn Main(
             </div>
         </div>
     }
+}
+
+#[component]
+fn TutorialGuide(
+    step: RwSignal<Option<TutorialStep>>,
+    current_section: RwSignal<AppSection>,
+) -> impl IntoView {
+    let current = Signal::derive(move || step.get().unwrap_or(TutorialStep::SignIn));
+    let target_rect = RwSignal::new(None::<TutorialTargetRect>);
+
+    let refresh_target = move |active: TutorialStep| {
+        request_animation_frame(move || {
+            target_rect.set(find_tutorial_target(active));
+            highlight_tutorial_target(active);
+        });
+    };
+
+    create_effect(move |_| {
+        if let Some(active) = step.get() {
+            current_section.set(active.section());
+            refresh_target(active);
+        } else {
+            clear_tutorial_target_highlight();
+        }
+    });
+
+    let resize_handle = window_event_listener(ev::resize, move |_| {
+        if let Some(active) = step.get_untracked() {
+            target_rect.set(find_tutorial_target(active));
+        }
+    });
+    on_cleanup(move || {
+        resize_handle.remove();
+        clear_tutorial_target_highlight();
+    });
+
+    let go_previous = move |_| {
+        let Some(active) = step.get_untracked() else {
+            return;
+        };
+        let index = active.index();
+        if index == 0 {
+            return;
+        }
+        let previous = TUTORIAL_STEPS[index - 1];
+        current_section.set(previous.section());
+        step.set(Some(previous));
+    };
+
+    let go_next = move |_| {
+        let Some(active) = step.get_untracked() else {
+            return;
+        };
+        let index = active.index();
+        if index + 1 >= TUTORIAL_STEPS.len() {
+            mark_beginner_tutorial_seen();
+            step.set(None);
+            return;
+        }
+        let next = TUTORIAL_STEPS[index + 1];
+        current_section.set(next.section());
+        step.set(Some(next));
+    };
+
+    view! {
+        <Show when=move || step.get().is_some()>
+            <div class="pointer-events-none fixed inset-0 z-[90]">
+                <div
+                    class="pointer-events-auto fixed z-[92] w-[min(20rem,calc(100vw-2rem))] rounded-lg border border-border bg-surface shadow-2xl"
+                    style=move || tutorial_bubble_style(current.get(), target_rect.get())
+                >
+                    <div class="flex items-start justify-between gap-3 px-4 pt-4">
+                        <div class="flex min-w-0 gap-3">
+                            <div class="mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-lg bg-primary-soft text-primary">
+                                {move || view! { <Icon name=current.get().icon() class="size-4" /> }}
+                            </div>
+                            <div class="min-w-0">
+                                <div class="text-[11px] font-medium uppercase text-muted">
+                                    {move || {
+                                        t("tutorial.step_count")
+                                            .replace("{current}", &(current.get().index() + 1).to_string())
+                                            .replace("{total}", &TUTORIAL_STEPS.len().to_string())
+                                    }}
+                                </div>
+                                <h3 class="mt-0.5 text-sm font-semibold text-content">
+                                    {move || t(current.get().title_key())}
+                                </h3>
+                            </div>
+                        </div>
+                        <button
+                            type="button"
+                            title=move || t("tutorial.close")
+                            aria-label=move || t("tutorial.close")
+                            class="inline-flex size-7 shrink-0 items-center justify-center rounded-md text-muted hover:bg-bg hover:text-content focus:outline-none"
+                            on:click=move |_| {
+                                mark_beginner_tutorial_seen();
+                                step.set(None);
+                            }
+                        >
+                            <Icon name=IconName::Close class="size-3.5" />
+                        </button>
+                    </div>
+
+                    <div class="px-4 pb-4 pt-3">
+                        <p class="text-sm leading-5 text-muted">
+                            {move || t(current.get().body_key())}
+                        </p>
+
+                        <div class="mt-4 flex items-center gap-1">
+                            {TUTORIAL_STEPS.iter().copied().map(|item| {
+                                view! {
+                                    <span
+                                        class=move || {
+                                            let active = current.get();
+                                            if item == active {
+                                                "h-1 flex-1 rounded-full bg-primary"
+                                            } else if item.index() < active.index() {
+                                                "h-1 flex-1 rounded-full bg-primary/40"
+                                            } else {
+                                                "h-1 flex-1 rounded-full bg-border"
+                                            }
+                                        }
+                                    ></span>
+                                }
+                            }).collect_view()}
+                        </div>
+
+                        <div class="mt-4 flex items-center justify-between gap-2">
+                            <button
+                                type="button"
+                                class="px-2 py-1.5 text-xs font-medium text-muted hover:text-content focus:outline-none"
+                                on:click=move |_| {
+                                    mark_beginner_tutorial_seen();
+                                    step.set(None);
+                                }
+                            >
+                                {move || t("tutorial.skip")}
+                            </button>
+                            <div class="flex items-center gap-2">
+                                <button
+                                    type="button"
+                                    class="rounded-md border border-border bg-bg px-3 py-1.5 text-xs font-medium text-content hover:bg-surface focus:outline-none disabled:opacity-50"
+                                    prop:disabled=move || current.get().index() == 0
+                                    on:click=go_previous
+                                >
+                                    {move || t("tutorial.previous")}
+                                </button>
+                                <button
+                                    type="button"
+                                    class="rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-on-primary hover:bg-primary-hover focus:outline-none"
+                                    on:click=go_next
+                                >
+                                    {move || {
+                                        if current.get().index() + 1 >= TUTORIAL_STEPS.len() {
+                                            t("tutorial.finish")
+                                        } else {
+                                            t("tutorial.next")
+                                        }
+                                    }}
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </Show>
+    }
+}
+
+#[component]
+fn TutorialDemoScreen(step: TutorialStep) -> impl IntoView {
+    match step {
+        TutorialStep::Connect => view! { <TutorialConnectDemo /> }.into_view(),
+        TutorialStep::CreateKey => view! { <TutorialKeysDemo /> }.into_view(),
+        _ => view! { <TutorialReposDemo step=step /> }.into_view(),
+    }
+}
+
+#[component]
+fn TutorialReposDemo(step: TutorialStep) -> impl IntoView {
+    let show_repo_actions = matches!(
+        step,
+        TutorialStep::BindKey
+            | TutorialStep::CloneRepo
+            | TutorialStep::ConnectRepo
+            | TutorialStep::TestRepo
+    );
+    let show_more_menu = matches!(step, TutorialStep::ConnectRepo | TutorialStep::TestRepo);
+
+    view! {
+        <div class="flex h-full flex-col gap-5">
+            <div class="flex items-center justify-between gap-3">
+                <h1 class="text-2xl font-semibold text-content">{move || t("nav.repos")}</h1>
+                <div class="flex shrink-0 items-center gap-2">
+                    <button
+                        type="button"
+                        class="relative inline-flex size-9 items-center justify-center rounded-lg border border-border bg-surface text-content"
+                    >
+                        <Icon name=IconName::Download class="size-4" />
+                    </button>
+                    <button
+                        type="button"
+                        data-tutorial-target="sync-repos"
+                        class="py-2 px-4 text-sm font-medium rounded-lg border border-border bg-primary-soft text-content"
+                    >
+                        {move || t("repos.sync")}
+                    </button>
+                </div>
+            </div>
+
+            <div class="flex flex-wrap items-center gap-2">
+                <div class="flex-1 min-w-[12rem] rounded-lg border border-border bg-bg px-3 py-2 text-sm text-muted">
+                    {move || t("repos.search_placeholder")}
+                </div>
+                <div class="rounded-lg border border-border bg-bg px-3 py-2 text-sm text-muted">{move || t("repos.all")}</div>
+                <div class="rounded-lg border border-border bg-bg px-3 py-2 text-sm text-muted">{move || t("repos.all_languages")}</div>
+            </div>
+
+            <div class="flex flex-col flex-1 min-h-0">
+                <div class="relative flex-1 min-h-0 overflow-hidden rounded-lg border border-border bg-surface">
+                    <table class="min-w-[34rem] w-full table-fixed border-collapse text-sm">
+                        <thead class="bg-surface">
+                            <tr class="border-b border-border">
+                                <th class="w-[11rem] text-start font-medium text-muted px-3 py-2">{move || t("repos.repository")}</th>
+                                <th class="w-[6rem] text-start font-medium text-muted px-3 py-2">{move || t("repos.visibility")}</th>
+                                <th class="w-[7rem] text-start font-medium text-muted px-3 py-2">{move || t("repos.language")}</th>
+                                <th class="w-[8rem] text-start font-medium text-muted px-3 py-2">{move || t("repos.actions")}</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr class="border-b border-border hover:bg-bg">
+                                <td class="w-[11rem] px-3 py-2 font-medium text-content">"demo/app"</td>
+                                <td class="w-[6rem] px-3 py-2">
+                                    <span class="inline-flex items-center text-[11px] py-0.5 px-2 rounded-full border border-border text-muted">{move || t("repos.public")}</span>
+                                </td>
+                                <td class="w-[7rem] px-3 py-2 text-muted">
+                                    <span class="inline-flex items-center gap-1.5">
+                                        <span class="inline-block size-2.5 rounded-full bg-[#dea584]"></span>
+                                        "Rust"
+                                    </span>
+                                </td>
+                                <td class="w-[8rem] px-3 py-2">
+                                    <Show
+                                        when=move || show_repo_actions
+                                        fallback=move || view! { <span class="text-xs text-muted">{move || t("tutorial.demo_ready")}</span> }
+                                    >
+                                        <div class="relative inline-flex min-w-max items-center gap-1.5">
+                                            <button
+                                                type="button"
+                                                data-tutorial-target="clone-repo"
+                                                class="inline-flex items-center justify-center size-8 rounded-md text-content bg-primary-soft"
+                                            >
+                                                <Icon name=IconName::Download class="size-4" />
+                                            </button>
+                                            <button
+                                                type="button"
+                                                data-tutorial-target="bind-key"
+                                                class="inline-flex items-center justify-center size-8 rounded-md text-content bg-primary-soft/70"
+                                            >
+                                                <Icon name=IconName::Key class="size-4" />
+                                            </button>
+                                            <button
+                                                type="button"
+                                                data-tutorial-target="repository-more-actions"
+                                                class="inline-flex items-center justify-center size-8 rounded-md text-content bg-primary-soft/70"
+                                            >
+                                                <Icon name=IconName::MoreVertical class="size-4" />
+                                            </button>
+                                            <Show when=move || show_more_menu>
+                                                <div class="absolute right-0 top-10 z-20 min-w-28 rounded-lg border border-border bg-surface p-1 shadow-xl">
+                                                    <button
+                                                        type="button"
+                                                        data-tutorial-target="connect-repo"
+                                                        class="flex w-full items-center justify-between rounded-md px-2.5 py-2 text-xs text-content bg-bg"
+                                                    >
+                                                        <span>{move || t("repos.connect_remote")}</span>
+                                                        <Icon name=IconName::Server class="size-3.5" />
+                                                    </button>
+                                                    <button
+                                                        type="button"
+                                                        data-tutorial-target="test-repo"
+                                                        class="mt-1 flex w-full items-center justify-between rounded-md px-2.5 py-2 text-xs text-content bg-bg"
+                                                    >
+                                                        <span>{move || t("repos.test_remote")}</span>
+                                                        <Icon name=IconName::Check class="size-3.5" />
+                                                    </button>
+                                                </div>
+                                            </Show>
+                                        </div>
+                                    </Show>
+                                </td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    }
+}
+
+#[component]
+fn TutorialConnectDemo() -> impl IntoView {
+    view! {
+        <div class="flex h-full flex-col gap-5">
+            <div class="flex items-center justify-between gap-3">
+                <h1 class="text-2xl font-semibold text-content">{move || t("connect.title")}</h1>
+                <button type="button" class="shrink-0 py-2 px-4 text-sm font-medium rounded-lg border border-border bg-primary text-on-primary">
+                    {move || t("connect.add")}
+                </button>
+            </div>
+            <div class="flex items-center gap-2 min-w-0">
+                <div class="flex-1 rounded-lg border border-border bg-bg px-3 py-2 text-sm text-muted">{move || t("connect.search_placeholder")}</div>
+                <div class="rounded-lg border border-border bg-bg px-3 py-2 text-sm text-muted">{move || t("connect.filter_type_all")}</div>
+                <div class="rounded-lg border border-border bg-bg px-3 py-2 text-sm text-muted">{move || t("connect.filter_status_all")}</div>
+            </div>
+            <div class="overflow-hidden rounded-lg border border-border bg-surface">
+                <table class="min-w-[30rem] w-full table-fixed border-collapse text-sm">
+                    <thead>
+                        <tr class="border-b border-border">
+                            <th class="text-start font-medium text-muted px-3 py-2">{move || t("connect.name")}</th>
+                            <th class="w-[5rem] text-start font-medium text-muted px-3 py-2">{move || t("connect.type")}</th>
+                            <th class="w-[8rem] text-start font-medium text-muted px-3 py-2">{move || t("connect.status")}</th>
+                            <th class="w-[8rem] text-start font-medium text-muted px-3 py-2">{move || t("connect.actions")}</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr class="border-b border-border hover:bg-bg">
+                            <td class="px-3 py-2 font-medium text-content">{move || t("connect.local_name")}</td>
+                            <td class="px-3 py-2 text-muted">{move || t("connect.type_local")}</td>
+                            <td class="px-3 py-2">
+                                <span class="inline-flex items-center gap-1.5 text-[11px] py-0.5 px-2 rounded-full border border-border text-muted">
+                                    <span class="size-1.5 rounded-full bg-muted"></span>
+                                    {move || t("connect.status_offline")}
+                                </span>
+                            </td>
+                            <td class="px-3 py-2">
+                                <button
+                                    type="button"
+                                    data-tutorial-target="connect-environment"
+                                    class="inline-flex items-center justify-center size-8 rounded-md text-content bg-primary-soft"
+                                >
+                                    <Icon name=IconName::Power class="size-4" />
+                                </button>
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    }
+}
+
+#[component]
+fn TutorialKeysDemo() -> impl IntoView {
+    view! {
+        <div class="flex h-full flex-col gap-5">
+            <div class="flex items-center justify-between gap-3">
+                <h1 class="text-2xl font-semibold text-content">{move || t("keys.title")}</h1>
+                <button
+                    type="button"
+                    data-tutorial-target="create-key"
+                    class="shrink-0 py-2 px-4 text-sm font-medium rounded-lg border border-border bg-primary-soft text-content"
+                >
+                    {move || t("keys.create")}
+                </button>
+            </div>
+            <div class="flex items-center gap-2 min-w-0">
+                <div class="flex-1 rounded-lg border border-border bg-bg px-3 py-2 text-sm text-muted">{move || t("keys.search_placeholder")}</div>
+                <div class="rounded-lg border border-border bg-bg px-3 py-2 text-sm text-muted">{move || t("keys.filter_algorithm_all")}</div>
+                <div class="rounded-lg border border-border bg-bg px-3 py-2 text-sm text-muted">{move || t("keys.filter_date_all")}</div>
+            </div>
+            <div class="overflow-hidden rounded-lg border border-border bg-surface">
+                <table class="min-w-[36rem] w-full table-fixed border-collapse text-sm">
+                    <thead>
+                        <tr class="border-b border-border">
+                            <th class="w-[8rem] text-start font-medium text-muted px-3 py-2">{move || t("keys.directory")}</th>
+                            <th class="w-[9rem] text-start font-medium text-muted px-3 py-2">{move || t("keys.algorithm")}</th>
+                            <th class="w-[8rem] text-start font-medium text-muted px-3 py-2">{move || t("keys.remark")}</th>
+                            <th class="w-[9rem] text-start font-medium text-muted px-3 py-2">{move || t("keys.created_at")}</th>
+                            <th class="w-[6rem] text-start font-medium text-muted px-3 py-2">{move || t("keys.actions")}</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr class="border-b border-border hover:bg-bg">
+                            <td class="px-3 py-2 font-mono font-medium text-content">"prod-deploy"</td>
+                            <td class="px-3 py-2"><span class="inline-flex items-center text-[11px] py-0.5 px-2 rounded-full border border-border text-muted">"ed25519"</span></td>
+                            <td class="px-3 py-2 text-muted">"production"</td>
+                            <td class="px-3 py-2 text-muted">"2026-06-20"</td>
+                            <td class="px-3 py-2 text-muted">"..."</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    }
+}
+
+fn should_start_beginner_tutorial() -> bool {
+    web_sys::window()
+        .and_then(|window| window.local_storage().ok().flatten())
+        .and_then(|storage| storage.get_item(TUTORIAL_STORAGE_KEY).ok().flatten())
+        .is_none()
+}
+
+fn mark_beginner_tutorial_seen() {
+    if let Some(storage) =
+        web_sys::window().and_then(|window| window.local_storage().ok().flatten())
+    {
+        let _ = storage.set_item(TUTORIAL_STORAGE_KEY, "1");
+    }
+}
+
+fn find_tutorial_target(step: TutorialStep) -> Option<TutorialTargetRect> {
+    let element = find_tutorial_target_element(step)?;
+    let rect = element.get_bounding_client_rect();
+    Some(TutorialTargetRect {
+        top: rect.top(),
+        left: rect.left(),
+        width: rect.width(),
+        height: rect.height(),
+    })
+}
+
+fn highlight_tutorial_target(step: TutorialStep) {
+    clear_tutorial_target_highlight();
+    let Some(element) = find_tutorial_target_element(step) else {
+        return;
+    };
+    let _ = element.class_list().add_1("tutorial-active-target");
+}
+
+fn find_tutorial_target_element(step: TutorialStep) -> Option<web_sys::Element> {
+    let document = web_sys::window()?.document()?;
+    let elements = document.query_selector_all(step.target_selector()).ok()?;
+    let mut fallback = None::<web_sys::Element>;
+
+    for index in 0..elements.length() {
+        let Some(element) = elements
+            .item(index)
+            .and_then(|node| node.dyn_into::<web_sys::Element>().ok())
+        else {
+            continue;
+        };
+        let rect = element.get_bounding_client_rect();
+        if rect.width() <= 0.0 || rect.height() <= 0.0 {
+            continue;
+        }
+        let class_name = element.class_name();
+        if fallback.is_none() {
+            fallback = Some(element.clone());
+        }
+        if !class_name.contains("opacity-0") && !class_name.contains("pointer-events-none") {
+            return Some(element);
+        }
+    }
+
+    fallback
+}
+
+fn clear_tutorial_target_highlight() {
+    let Some(document) = web_sys::window().and_then(|window| window.document()) else {
+        return;
+    };
+    let Ok(elements) = document.query_selector_all(".tutorial-active-target") else {
+        return;
+    };
+    for index in 0..elements.length() {
+        if let Some(element) = elements
+            .item(index)
+            .and_then(|node| node.dyn_into::<web_sys::Element>().ok())
+        {
+            let _ = element.class_list().remove_1("tutorial-active-target");
+        }
+    }
+}
+
+fn tutorial_bubble_style(step: TutorialStep, rect: Option<TutorialTargetRect>) -> String {
+    let target = rect.unwrap_or_else(|| tutorial_fallback_rect(step));
+    let (viewport_width, viewport_height) = viewport_size();
+    let bubble_width = 320.0;
+    let bubble_height = 210.0;
+    let gap = 14.0;
+    let margin = 16.0;
+
+    let fits_right = target.left + target.width + gap + bubble_width <= viewport_width - margin;
+    let fits_left = target.left - gap - bubble_width >= margin;
+    let left = if fits_right {
+        target.left + target.width + gap
+    } else if fits_left {
+        target.left - gap - bubble_width
+    } else {
+        target
+            .left
+            .clamp(margin, (viewport_width - bubble_width - margin).max(margin))
+    };
+    let top = (target.top + target.height / 2.0 - bubble_height / 2.0)
+        .clamp(68.0, (viewport_height - bubble_height - margin).max(68.0));
+
+    format!("top:{top:.1}px;left:{left:.1}px;")
+}
+
+fn tutorial_fallback_rect(step: TutorialStep) -> TutorialTargetRect {
+    let (viewport_width, viewport_height) = viewport_size();
+    match step {
+        TutorialStep::SignIn => TutorialTargetRect {
+            top: (viewport_height - 74.0).max(80.0),
+            left: 14.0,
+            width: 188.0,
+            height: 46.0,
+        },
+        TutorialStep::Sync => TutorialTargetRect {
+            top: 86.0,
+            left: (viewport_width - 164.0).max(220.0),
+            width: 118.0,
+            height: 46.0,
+        },
+        TutorialStep::Connect => TutorialTargetRect {
+            top: 184.0,
+            left: (viewport_width - 180.0).max(260.0),
+            width: 128.0,
+            height: 46.0,
+        },
+        TutorialStep::CreateKey => TutorialTargetRect {
+            top: 86.0,
+            left: (viewport_width - 184.0).max(220.0),
+            width: 138.0,
+            height: 46.0,
+        },
+        TutorialStep::BindKey
+        | TutorialStep::CloneRepo
+        | TutorialStep::ConnectRepo
+        | TutorialStep::TestRepo => TutorialTargetRect {
+            top: 214.0,
+            left: (viewport_width - 178.0).max(220.0),
+            width: 132.0,
+            height: 46.0,
+        },
+    }
+}
+
+fn viewport_size() -> (f64, f64) {
+    let Some(window) = web_sys::window() else {
+        return (1024.0, 768.0);
+    };
+    let width = window
+        .inner_width()
+        .ok()
+        .and_then(|value| value.as_f64())
+        .unwrap_or(1024.0);
+    let height = window
+        .inner_height()
+        .ok()
+        .and_then(|value| value.as_f64())
+        .unwrap_or(768.0);
+    (width, height)
 }
 
 #[component]

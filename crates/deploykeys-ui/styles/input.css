@@ -109,4 +109,36 @@
     filter: brightness(1.24) contrast(1.16) saturate(1.18)
       drop-shadow(0 10px 18px color-mix(in oklab, var(--color-primary) 28%, transparent));
   }
+
+  .tutorial-active-target {
+    animation: tutorial-active-target-color 1.25s ease-in-out infinite;
+  }
+
+  .tutorial-active-target svg,
+  .tutorial-active-target [aria-hidden="true"] {
+    animation: tutorial-active-target-color 1.25s ease-in-out infinite;
+  }
+
+  @keyframes tutorial-active-target-color {
+    0%,
+    100% {
+      color: var(--color-content);
+    }
+    50% {
+      color: var(--color-primary);
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .tutorial-active-target {
+      animation: none;
+      color: var(--color-primary) !important;
+    }
+
+    .tutorial-active-target svg,
+    .tutorial-active-target [aria-hidden="true"] {
+      animation: none;
+      color: var(--color-primary) !important;
+    }
+  }
 }

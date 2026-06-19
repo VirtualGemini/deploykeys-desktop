@@ -268,6 +268,7 @@ pub fn Keys(#[allow(unused_variables)] pending_count: RwSignal<usize>) -> impl I
                 <h1 class="text-2xl font-semibold text-content">{move || t("keys.title")}</h1>
                 <button
                     type="button"
+                    data-tutorial-target="create-key"
                     title=move || if has_connection.get() { String::new() } else { t("connect.required_hint").to_string() }
                     class="shrink-0 py-2 px-4 text-sm font-medium rounded-lg border border-border bg-primary text-on-primary hover:bg-primary-hover focus:outline-none transition-colors disabled:opacity-50 disabled:pointer-events-none"
                     prop:disabled=move || !has_connection.get()

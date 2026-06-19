@@ -729,6 +729,54 @@ const EN: &[(&str, &str)] = &[
     ("keys.dialog_title_edit", "Edit SSH Key"),
     ("keys.dialog_edit_submit", "Save"),
     ("keys.dialog_editing", "Saving…"),
+    ("tutorial.open", "Beginner tutorial"),
+    ("tutorial.close", "Close tutorial"),
+    ("tutorial.skip", "Skip"),
+    ("tutorial.previous", "Previous"),
+    ("tutorial.next", "Next"),
+    ("tutorial.finish", "Finish"),
+    ("tutorial.step_count", "Step {current} of {total}"),
+    ("tutorial.demo_ready", "Ready"),
+    ("tutorial.signin.title", "Sign in"),
+    (
+        "tutorial.signin.body",
+        "Start from the GitHub sign-in entry. This tutorial only demonstrates the flow and does not submit a token.",
+    ),
+    ("tutorial.sync.title", "Sync repositories"),
+    (
+        "tutorial.sync.body",
+        "After sign-in, sync the GitHub repository list so deploy-key actions have repositories to work with.",
+    ),
+    ("tutorial.connect.title", "Connect an environment"),
+    (
+        "tutorial.connect.body",
+        "Choose the local machine or a server connection. Keys, clone tasks, and remote checks use the active connection.",
+    ),
+    ("tutorial.create_key.title", "Create a key"),
+    (
+        "tutorial.create_key.body",
+        "Create an SSH key on the active connection. The key can later be attached to a repository as a deploy key.",
+    ),
+    ("tutorial.bind_key.title", "Bind the key"),
+    (
+        "tutorial.bind_key.body",
+        "Return to the repository list and bind the SSH key to the target repository with pull or push authorization.",
+    ),
+    ("tutorial.clone_repo.title", "Clone repository"),
+    (
+        "tutorial.clone_repo.body",
+        "Clone the repository to the active environment after the deploy key is ready.",
+    ),
+    ("tutorial.connect_repo.title", "Connect repository"),
+    (
+        "tutorial.connect_repo.body",
+        "Connect the cloned repository so DeployKeys can manage it through the selected environment.",
+    ),
+    ("tutorial.test_repo.title", "Test repository"),
+    (
+        "tutorial.test_repo.body",
+        "Finish by testing the repository connection. This confirms the path, key, and remote access are aligned.",
+    ),
 ];
 
 const ZH_HANS: &[(&str, &str)] = &[
@@ -1056,6 +1104,54 @@ const ZH_HANS: &[(&str, &str)] = &[
     ("keys.dialog_title_edit", "编辑 SSH 密钥"),
     ("keys.dialog_edit_submit", "保存"),
     ("keys.dialog_editing", "保存中…"),
+    ("tutorial.open", "新手教程"),
+    ("tutorial.close", "关闭教程"),
+    ("tutorial.skip", "跳过"),
+    ("tutorial.previous", "上一步"),
+    ("tutorial.next", "下一步"),
+    ("tutorial.finish", "完成"),
+    ("tutorial.step_count", "第 {current} 步，共 {total} 步"),
+    ("tutorial.demo_ready", "就绪"),
+    ("tutorial.signin.title", "先登录"),
+    (
+        "tutorial.signin.body",
+        "从 GitHub 登录入口开始。本教程只演示流程，不会提交令牌。",
+    ),
+    ("tutorial.sync.title", "同步仓库"),
+    (
+        "tutorial.sync.body",
+        "登录后同步 GitHub 仓库列表，后续绑定密钥、克隆和连接仓库都从这里开始。",
+    ),
+    ("tutorial.connect.title", "连接环境"),
+    (
+        "tutorial.connect.body",
+        "选择本机或服务器连接。密钥、克隆任务和仓库测试都会使用当前连接。",
+    ),
+    ("tutorial.create_key.title", "创建密钥"),
+    (
+        "tutorial.create_key.body",
+        "在当前连接上创建 SSH 密钥，后续会把它作为 Deploy Key 绑定到仓库。",
+    ),
+    ("tutorial.bind_key.title", "绑定密钥"),
+    (
+        "tutorial.bind_key.body",
+        "回到仓库列表，把刚创建的 SSH 密钥绑定到目标仓库，并选择拉取或推送权限。",
+    ),
+    ("tutorial.clone_repo.title", "克隆仓库"),
+    (
+        "tutorial.clone_repo.body",
+        "Deploy Key 准备好后，把仓库克隆到当前连接的环境中。",
+    ),
+    ("tutorial.connect_repo.title", "连接仓库"),
+    (
+        "tutorial.connect_repo.body",
+        "克隆完成后连接仓库，让 DeployKeys 可以通过当前环境管理它。",
+    ),
+    ("tutorial.test_repo.title", "测试仓库"),
+    (
+        "tutorial.test_repo.body",
+        "最后测试仓库连接，确认路径、密钥和远端访问都已经对齐。",
+    ),
 ];
 
 const ZH_HANT: &[(&str, &str)] = &[
@@ -1389,6 +1485,54 @@ const ZH_HANT: &[(&str, &str)] = &[
     ("keys.dialog_title_edit", "編輯 SSH 金鑰"),
     ("keys.dialog_edit_submit", "儲存"),
     ("keys.dialog_editing", "儲存中…"),
+    ("tutorial.open", "新手教學"),
+    ("tutorial.close", "關閉教學"),
+    ("tutorial.skip", "跳過"),
+    ("tutorial.previous", "上一步"),
+    ("tutorial.next", "下一步"),
+    ("tutorial.finish", "完成"),
+    ("tutorial.step_count", "第 {current} 步，共 {total} 步"),
+    ("tutorial.demo_ready", "就緒"),
+    ("tutorial.signin.title", "先登入"),
+    (
+        "tutorial.signin.body",
+        "從 GitHub 登入入口開始。本教學只演示流程，不會提交權杖。",
+    ),
+    ("tutorial.sync.title", "同步儲存庫"),
+    (
+        "tutorial.sync.body",
+        "登入後同步 GitHub 儲存庫列表，後續綁定金鑰、複製和連線儲存庫都從這裡開始。",
+    ),
+    ("tutorial.connect.title", "連線環境"),
+    (
+        "tutorial.connect.body",
+        "選擇本機或伺服器連線。金鑰、複製任務和儲存庫測試都會使用目前連線。",
+    ),
+    ("tutorial.create_key.title", "建立金鑰"),
+    (
+        "tutorial.create_key.body",
+        "在目前連線上建立 SSH 金鑰，後續會把它作為 Deploy Key 綁定到儲存庫。",
+    ),
+    ("tutorial.bind_key.title", "綁定金鑰"),
+    (
+        "tutorial.bind_key.body",
+        "回到儲存庫列表，把剛建立的 SSH 金鑰綁定到目標儲存庫，並選擇拉取或推送權限。",
+    ),
+    ("tutorial.clone_repo.title", "複製儲存庫"),
+    (
+        "tutorial.clone_repo.body",
+        "Deploy Key 準備好後，把儲存庫複製到目前連線的環境中。",
+    ),
+    ("tutorial.connect_repo.title", "連線儲存庫"),
+    (
+        "tutorial.connect_repo.body",
+        "複製完成後連線儲存庫，讓 DeployKeys 可以透過目前環境管理它。",
+    ),
+    ("tutorial.test_repo.title", "測試儲存庫"),
+    (
+        "tutorial.test_repo.body",
+        "最後測試儲存庫連線，確認路徑、金鑰和遠端存取都已對齊。",
+    ),
 ];
 
 const JA: &[(&str, &str)] = &[

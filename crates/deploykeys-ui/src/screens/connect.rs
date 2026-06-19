@@ -442,6 +442,7 @@ fn ConnectionRow(conn: Connection, on_changed: Callback<()>) -> impl IntoView {
                 <div class="inline-flex min-w-max items-center gap-1.5">
                     <button
                         type="button"
+                        data-tutorial-target="connect-environment"
                         title=move || if is_connected.get() { t("connect.disconnect") } else { t("connect.connect") }
                         aria-label=move || if is_connected.get() { t("connect.disconnect") } else { t("connect.connect") }
                         class=move || {
