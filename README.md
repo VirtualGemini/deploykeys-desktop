@@ -15,8 +15,6 @@ A secure, user-friendly desktop application for managing GitHub Deploy Keys with
 - ✅ **Drift Detection** - Validation and status monitoring
 - 🔐 **Secure Credential Storage** - Uses system keychain (macOS/Linux)
 
-> 当前实现进度见 [STATUS.md](STATUS.md)（唯一事实来源）。
-
 ## 🚀 Quick Start
 
 ### Prerequisites
@@ -58,14 +56,6 @@ make db-setup
 make check
 ```
 
-## 📖 Documentation
-
-- [Status](STATUS.md) - 当前真实进度与已知技术债
-- [Architecture](ARCHITECTURE.md) - System design and architecture
-- [Plan](PLAN.md) - Roadmap (Phase 1-7)
-- [Contributing](CONTRIBUTING.md) - Development guidelines
-- [Quick Start](QUICKSTART.md) - Installation and usage guide
-
 ## 🏗️ Project Structure
 
 ```
@@ -76,7 +66,6 @@ deploykeys-desktop/
 │   └── deploykeys-ui/        # Leptos CSR frontend, built to wasm by Trunk
 ├── migrations/            # Database migrations (sqlx::migrate!)
 ├── tools/                 # Pinned Tailwind v4 standalone binary + installer
-├── docs/archive/          # Superseded phase reports (do not cite)
 └── .github/workflows/     # CI (fmt, clippy, test, audit)
 ```
 
@@ -110,18 +99,6 @@ make db-setup   # (Re)create the sqlx compile-time check database
 - Automatic log sanitization (`ghu_/gho_/ghs_/ghp_/github_pat_` tokens, auth headers, JSON token fields)
 - Private keys created atomically with mode 0600; partial failures are cleaned up
 - No modifications to `~/.ssh/config` or `~/.gitconfig`
-
-## 📊 Status
-
-详见 [STATUS.md](STATUS.md)。概要：
-
-- ✅ Phase 1: 项目骨架与数据层
-- ⚙️ Phase 2: GitHub 认证（设备流/账号持久化完成；Installations 同步与 token 刷新未完成）
-- 📋 Phase 3-7: Key 生成绑定流程部分提前实现，其余按 PLAN.md 推进
-
-## 🤝 Contributing
-
-We welcome contributions! Please read [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
 
 ## 📄 License
 

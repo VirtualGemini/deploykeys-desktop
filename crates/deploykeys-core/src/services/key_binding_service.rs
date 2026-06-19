@@ -286,7 +286,7 @@ impl KeyBindingService {
 
     /// Re-check a binding against GitHub and the local filesystem.
     ///
-    /// Status transitions follow the drift model from PLAN.md:
+    /// Status transitions follow the drift model:
     /// - deploy key missing on GitHub  -> `Drifted`
     /// - local private key missing     -> `OrphanedRemote`
     /// - both present                  -> `Active`
