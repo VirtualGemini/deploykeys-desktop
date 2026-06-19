@@ -240,7 +240,7 @@ pub fn Connect(#[allow(unused_variables)] pending_count: RwSignal<usize>) -> imp
                                 on:pointerup=move |ev| clear_table_drag(ev.pointer_id())
                                 on:pointercancel=move |ev| clear_table_drag(ev.pointer_id())
                             >
-                                <table class="min-w-[37rem] w-full table-fixed border-collapse text-sm">
+                                <table class="min-w-[35rem] w-full table-fixed border-collapse text-sm">
                                     <thead class="sticky top-0 z-10 bg-surface">
                                         <tr class="border-b border-border">
                                             <th class="min-w-[12rem] text-start font-medium text-muted px-3 py-2 whitespace-nowrap align-middle">
@@ -252,7 +252,7 @@ pub fn Connect(#[allow(unused_variables)] pending_count: RwSignal<usize>) -> imp
                                             <th class="w-[10rem] min-w-[10rem] text-start font-medium text-muted px-3 py-2 whitespace-nowrap align-middle">
                                                 {move || t("connect.status")}
                                             </th>
-                                            <th class="sticky right-0 z-20 w-[10rem] min-w-[10rem] bg-surface text-start font-medium text-muted px-3 py-2 whitespace-nowrap align-middle relative">
+                                            <th class="sticky right-0 z-20 w-[8rem] min-w-[8rem] bg-surface text-start font-medium text-muted px-3 py-2 whitespace-nowrap align-middle relative">
                                                 <span class="pointer-events-none absolute inset-y-0 left-0 w-px bg-border"></span>
                                                 {move || t("connect.actions")}
                                             </th>
@@ -337,21 +337,41 @@ fn ConnectionRow(conn: Connection) -> impl IntoView {
                     {move || if is_connected.get() { t("connect.status_connected") } else { t("connect.status_offline") }}
                 </span>
             </td>
-            <td class="sticky right-0 z-[1] w-[10rem] min-w-[10rem] bg-surface px-3 py-2 group-hover:bg-bg relative align-middle">
+            <td class="sticky right-0 z-[1] min-w-[8rem] bg-surface px-3 py-2 group-hover:bg-bg relative align-middle">
                 <span class="pointer-events-none absolute inset-y-0 left-0 w-px bg-border"></span>
                 <div class="inline-flex min-w-max items-center gap-1.5">
                     <button
                         type="button"
+                        title=move || if is_connected.get() { t("connect.disconnect") } else { t("connect.connect") }
+                        aria-label=move || if is_connected.get() { t("connect.disconnect") } else { t("connect.connect") }
                         class=move || {
                             if is_connected.get() {
-                                "inline-flex items-center justify-center py-1.5 px-3 text-sm font-medium rounded-lg border border-border bg-bg text-content hover:bg-surface focus:outline-none transition-colors"
+                                "inline-flex items-center justify-center size-8 rounded-md text-green-600 hover:bg-green-50 dark:text-green-400 dark:hover:bg-green-950 focus:outline-none transition-colors"
                             } else {
-                                "inline-flex items-center justify-center py-1.5 px-3 text-sm font-medium rounded-lg border border-transparent bg-primary text-on-primary hover:bg-primary-hover focus:outline-none transition-colors"
+                                "inline-flex items-center justify-center size-8 rounded-md text-muted hover:bg-bg hover:text-content focus:outline-none transition-colors"
                             }
                         }
                         on:click=toggle
                     >
-                        {move || if is_connected.get() { t("connect.disconnect") } else { t("connect.connect") }}
+                        <Icon name=IconName::Power class="size-4" />
+                    </button>
+                    <button
+                        type="button"
+                        title=move || t("connect.local_locked")
+                        aria-label=move || t("connect.edit")
+                        class="inline-flex items-center justify-center size-8 rounded-md text-content hover:bg-primary-soft dark:hover:bg-primary-soft/60 focus:outline-none disabled:opacity-50 disabled:pointer-events-none"
+                        prop:disabled=true
+                    >
+                        <Icon name=IconName::Edit class="size-4" />
+                    </button>
+                    <button
+                        type="button"
+                        title=move || t("connect.local_locked")
+                        aria-label=move || t("connect.delete")
+                        class="inline-flex items-center justify-center size-8 rounded-md text-red-600 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-950 focus:outline-none disabled:opacity-50 disabled:pointer-events-none"
+                        prop:disabled=true
+                    >
+                        <Icon name=IconName::Delete class="size-4" />
                     </button>
                 </div>
             </td>

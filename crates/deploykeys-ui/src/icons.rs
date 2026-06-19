@@ -23,6 +23,7 @@ pub enum IconName {
     Monitor,
     Moon,
     MoreVertical,
+    Power,
     QuickRoutes,
     Server,
     SettingsPlaceholder,
@@ -51,6 +52,7 @@ impl IconName {
             IconName::Monitor => "assets/images/svg/icons/monitor.svg",
             IconName::Moon => "assets/images/svg/icons/moon.svg",
             IconName::MoreVertical => "assets/images/svg/icons/more-vertical.svg",
+            IconName::Power => "assets/images/svg/icons/power.svg",
             IconName::QuickRoutes => "assets/images/svg/icons/quick-routes.svg",
             IconName::Server => "assets/images/svg/icons/server.svg",
             IconName::SettingsPlaceholder => "assets/images/svg/icons/settings-placeholder.svg",
@@ -79,6 +81,7 @@ impl IconName {
             IconName::Monitor => include_str!("../assets/images/svg/icons/monitor.svg"),
             IconName::Moon => include_str!("../assets/images/svg/icons/moon.svg"),
             IconName::MoreVertical => include_str!("../assets/images/svg/icons/more-vertical.svg"),
+            IconName::Power => include_str!("../assets/images/svg/icons/power.svg"),
             IconName::QuickRoutes => include_str!("../assets/images/svg/icons/quick-routes.svg"),
             IconName::Server => include_str!("../assets/images/svg/icons/server.svg"),
             IconName::SettingsPlaceholder => {
