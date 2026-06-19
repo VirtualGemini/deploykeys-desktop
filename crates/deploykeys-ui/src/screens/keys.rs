@@ -5,6 +5,7 @@
 //! `~/.ssh/deploykeys/<directory>/` with isolated directories per key.
 
 use crate::api::{self, SshKey};
+use crate::connection::connection_state;
 use crate::i18n::t;
 use crate::icons::{Icon, IconName};
 use crate::page_size::page_size;
@@ -38,6 +39,8 @@ enum CopyIconState {
 #[component]
 pub fn Keys(#[allow(unused_variables)] pending_count: RwSignal<usize>) -> impl IntoView {
     let progress = ProgressHandle::expect();
+    let conn = connection_state();
+    let has_connection = Signal::derive(move || conn.has_active());
     let keys = RwSignal::new(Vec::<SshKey>::new());
     let loading = RwSignal::new(false);
     let error = RwSignal::new(None::<String>);
@@ -51,9 +54,16 @@ pub fn Keys(#[allow(unused_variables)] pending_count: RwSignal<usize>) -> impl I
     let table_drag = RwSignal::new(None::<TableDragState>);
     let created_at_sort = RwSignal::new(CreatedAtSort::Desc);
 
-    // SSH keys are purely local — load them unconditionally on mount, with no
-    // sign-in dependency.
+    // SSH keys live on the active connection's filesystem. With no connection
+    // there is nothing to manage, so clear the list and skip loading; the load
+    // (re)runs automatically whenever a connection is established.
     create_effect(move |_| {
+        if !conn.has_active() {
+            keys.set(Vec::new());
+            error.set(None);
+            loading.set(false);
+            return;
+        }
         loading.set(true);
         let sim = progress.begin_simulated();
         spawn_local(async move {
@@ -266,13 +276,23 @@ pub fn Keys(#[allow(unused_variables)] pending_count: RwSignal<usize>) -> impl I
                 <h1 class="text-2xl font-semibold text-content">{move || t("keys.title")}</h1>
                 <button
                     type="button"
-                    class="shrink-0 py-2 px-4 text-sm font-medium rounded-lg border border-border bg-primary text-on-primary hover:bg-primary-hover focus:outline-none transition-colors disabled:opacity-50"
+                    title=move || if has_connection.get() { String::new() } else { t("connect.required_hint").to_string() }
+                    class="shrink-0 py-2 px-4 text-sm font-medium rounded-lg border border-border bg-primary text-on-primary hover:bg-primary-hover focus:outline-none transition-colors disabled:opacity-50 disabled:pointer-events-none"
+                    prop:disabled=move || !has_connection.get()
                     on:click=move |_| create_dialog_open.set(true)
                 >
                     {move || t("keys.create")}
                 </button>
             </div>
 
+            <Show
+                when=move || has_connection.get()
+                fallback=move || view! {
+                    <div class="flex flex-1 items-center justify-center py-16 text-center">
+                        <p class="text-sm text-muted">{move || t("keys.no_connection")}</p>
+                    </div>
+                }
+            >
             <div class="flex items-center gap-2 min-w-0">
                 <div class="flex-1 min-w-0">
                     <input
@@ -584,6 +604,7 @@ pub fn Keys(#[allow(unused_variables)] pending_count: RwSignal<usize>) -> impl I
                         </Show>
                     </Show>
                 </Show>
+            </Show>
 
             <CreateKeyDialog
                 open=create_dialog_open

@@ -36,6 +36,9 @@ const CLONE_TASKS_SETTING_KEY: &str = "clone_tasks";
 /// `app_settings` key under which each repository's latest successful clone
 /// path is stored as JSON.
 const REPO_CLONE_PATHS_SETTING_KEY: &str = "repo_clone_paths";
+/// `app_settings` key under which the currently connected connection id is
+/// stored (empty string = all connections offline).
+const ACTIVE_CONNECTION_SETTING_KEY: &str = "active_connection";
 
 /// Shared native state, managed by Tauri and injected into every command.
 struct AppState {
@@ -252,6 +255,28 @@ async fn set_language(state: State<'_, AppState>, code: String) -> Result<(), St
     state
         .db
         .set_setting(LANGUAGE_SETTING_KEY, &code)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+/// Read the persisted active connection id. `None` means it was never set (the
+/// UI then falls back to its default); an empty string means all offline.
+#[tauri::command]
+async fn get_active_connection(state: State<'_, AppState>) -> Result<Option<String>, String> {
+    state
+        .db
+        .get_setting(ACTIVE_CONNECTION_SETTING_KEY)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+/// Persist the active connection id. Pass an empty string to record that all
+/// connections are offline.
+#[tauri::command]
+async fn set_active_connection(state: State<'_, AppState>, value: String) -> Result<(), String> {
+    state
+        .db
+        .set_setting(ACTIVE_CONNECTION_SETTING_KEY, &value)
         .await
         .map_err(|e| e.to_string())
 }
@@ -1303,6 +1328,8 @@ pub fn run() {
             set_language,
             get_page_size,
             set_page_size,
+            get_active_connection,
+            set_active_connection,
             sign_in_with_token,
             open_url,
             sign_out,

@@ -42,6 +42,21 @@ pub async fn set_page_size(size: usize) -> Result<(), String> {
     invoke("set_page_size", &Args { size }).await
 }
 
+/// Read the persisted active connection id. `None` = never set (use default);
+/// empty string = all connections offline.
+pub async fn get_active_connection() -> Result<Option<String>, String> {
+    invoke_no_args("get_active_connection").await
+}
+
+/// Persist the active connection id (empty string records "all offline").
+pub async fn set_active_connection(value: &str) -> Result<(), String> {
+    #[derive(Serialize)]
+    struct Args<'a> {
+        value: &'a str,
+    }
+    invoke("set_active_connection", &Args { value }).await
+}
+
 /// Sign in with a Personal Access Token; returns the account on success.
 pub async fn sign_in_with_token(token: &str) -> Result<Account, String> {
     #[derive(Serialize)]

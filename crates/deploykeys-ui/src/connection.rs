@@ -6,6 +6,7 @@
 //! connections arrive in a later stage.
 
 use leptos::*;
+use wasm_bindgen_futures::spawn_local;
 
 /// Stable id of the built-in local connection.
 pub const LOCAL_ID: &str = "local";
@@ -59,18 +60,44 @@ impl ConnectionState {
     /// Make `id` the single connected connection (disconnects any other).
     pub fn connect(self, id: &str) {
         self.connected_id.set(Some(id.to_string()));
+        self.persist();
     }
 
     /// Take `id` offline if it is the connected one; no-op otherwise.
     pub fn disconnect(self, id: &str) {
         if self.connected_id.get_untracked().as_deref() == Some(id) {
             self.connected_id.set(None);
+            self.persist();
         }
+    }
+
+    /// Write the current connected id to the backend so the choice survives
+    /// navigation and app restarts. An empty string records "all offline".
+    fn persist(self) {
+        let value = self.connected_id.get_untracked().unwrap_or_default();
+        spawn_local(async move {
+            if let Err(e) = crate::api::set_active_connection(&value).await {
+                leptos::logging::warn!("Failed to persist active connection: {e}");
+            }
+        });
+    }
+
+    /// Apply a persisted value loaded from the backend: empty string = offline.
+    pub fn apply_persisted(self, value: String) {
+        self.connected_id
+            .set(if value.is_empty() { None } else { Some(value) });
     }
 
     /// Reactive read: is `id` the connected connection?
     pub fn is_connected(self, id: &str) -> bool {
         self.connected_id.get().as_deref() == Some(id)
+    }
+
+    /// Reactive read: is any connection currently connected? When false, the
+    /// app has no environment to operate through, so connection-bound actions
+    /// (managing keys, cloning, binding deploy keys) must be blocked.
+    pub fn has_active(self) -> bool {
+        self.connected_id.get().is_some()
     }
 }
 

@@ -7,6 +7,7 @@
 //! signed-out "Refresh" routes to the sign-in screen instead of erroring.
 
 use crate::api::{self, Repo, SshKey};
+use crate::connection::connection_state;
 use crate::i18n::t;
 use crate::icons::{Icon, IconName};
 use crate::page_size::page_size;
@@ -54,6 +55,8 @@ pub fn Repos(
     on_sign_in_hint: Callback<()>,
 ) -> impl IntoView {
     let progress = ProgressHandle::expect();
+    let conn = connection_state();
+    let has_connection = Signal::derive(move || conn.has_active());
     let table_scroll_ref = NodeRef::<html::Div>::new();
     let table_drag = RwSignal::new(None::<TableDragState>);
     let repos = RwSignal::new(Vec::<Repo>::new());
@@ -628,28 +631,29 @@ pub fn Repos(
                                                                         <div class="inline-flex min-w-max items-center gap-1.5">
                                                                             <button
                                                                                 type="button"
-                                                                                title=move || t("repos.clone_repository")
+                                                                                title=move || if has_connection.get() { t("repos.clone_repository").to_string() } else { t("connect.required_hint").to_string() }
                                                                                 aria-label=move || t("repos.clone_repository")
                                                                                 class=move || {
                                                                                     let base = "relative inline-flex items-center justify-center size-8 overflow-hidden rounded-md text-primary hover:bg-primary-soft focus:outline-none disabled:pointer-events-none";
                                                                                     if clone_picker_running.get() == Some(repo_id) {
                                                                                         format!("{base} clone-activity-scan")
-                                                                                    } else if clone_picker_running.get().is_some() {
+                                                                                    } else if clone_picker_running.get().is_some() || !has_connection.get() {
                                                                                         format!("{base} opacity-50")
                                                                                     } else {
                                                                                         base.to_string()
                                                                                     }
                                                                                 }
-                                                                                prop:disabled=move || clone_picker_running.get().is_some()
+                                                                                prop:disabled=move || clone_picker_running.get().is_some() || !has_connection.get()
                                                                                 on:click=move |_| clone_repo(repo_for_clone.clone())
                                                                             >
                                                                                 <Icon name=IconName::Download class="size-4" />
                                                                             </button>
                                                                             <button
                                                                                 type="button"
-                                                                                title=move || t("repos.bind_key")
+                                                                                title=move || if has_connection.get() { t("repos.bind_key").to_string() } else { t("connect.required_hint").to_string() }
                                                                                 aria-label=move || t("repos.bind_key")
-                                                                                class="inline-flex items-center justify-center size-8 rounded-md text-content hover:bg-primary-soft dark:hover:bg-primary-soft/60 focus:outline-none"
+                                                                                class="inline-flex items-center justify-center size-8 rounded-md text-content hover:bg-primary-soft dark:hover:bg-primary-soft/60 focus:outline-none disabled:opacity-50 disabled:pointer-events-none"
+                                                                                prop:disabled=move || !has_connection.get()
                                                                                 on:click=move |_| open_bind_dialog(repo_for_bind.clone())
                                                                             >
                                                                                 <Icon name=IconName::Key class="size-4" />
@@ -657,9 +661,10 @@ pub fn Repos(
                                                                             <button
                                                                                 type="button"
                                                                                 data-more-actions-button=""
-                                                                                title=move || t("repos.more_actions")
+                                                                                title=move || if has_connection.get() { t("repos.more_actions").to_string() } else { t("connect.required_hint").to_string() }
                                                                                 aria-label=move || t("repos.more_actions")
-                                                                                class="inline-flex items-center justify-center size-8 rounded-md text-content hover:bg-primary-soft dark:hover:bg-primary-soft/60 focus:outline-none"
+                                                                                class="inline-flex items-center justify-center size-8 rounded-md text-content hover:bg-primary-soft dark:hover:bg-primary-soft/60 focus:outline-none disabled:opacity-50 disabled:pointer-events-none"
+                                                                                prop:disabled=move || !has_connection.get()
                                                                                 on:click=move |ev| {
                                                                                     ev.stop_propagation();
                                                                                     let (top, left) = more_menu_position(&ev);
@@ -780,6 +785,8 @@ fn RepoMoreActionsDropdown(
     on_connect: Callback<i64>,
     on_test: Callback<i64>,
 ) -> impl IntoView {
+    let conn = connection_state();
+    let disabled = Signal::derive(move || running.get().is_some() || !conn.has_active());
     view! {
         <Show when=move || menu.get().is_some()>
             <div
@@ -798,7 +805,7 @@ fn RepoMoreActionsDropdown(
                 <button
                     type="button"
                     class="block w-full px-3 py-1.5 text-left text-sm font-medium text-content hover:bg-bg hover:text-primary focus:outline-none disabled:opacity-50"
-                    prop:disabled=move || running.get().is_some()
+                    prop:disabled=move || disabled.get()
                     on:click=move |_| {
                         if let Some(menu) = menu.get_untracked() {
                             on_connect.call(menu.repo_id);
@@ -810,7 +817,7 @@ fn RepoMoreActionsDropdown(
                 <button
                     type="button"
                     class="block w-full px-3 py-1.5 text-left text-sm font-medium text-content hover:bg-bg hover:text-primary focus:outline-none disabled:opacity-50"
-                    prop:disabled=move || running.get().is_some()
+                    prop:disabled=move || disabled.get()
                     on:click=move |_| {
                         if let Some(menu) = menu.get_untracked() {
                             on_test.call(menu.repo_id);

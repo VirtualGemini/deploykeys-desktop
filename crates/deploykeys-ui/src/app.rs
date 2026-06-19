@@ -81,6 +81,7 @@ pub fn App() -> impl IntoView {
     theme::provide_theme(Theme::System);
     page_size::provide_page_size(DEFAULT_PAGE_SIZE);
     connection::provide_connection_state();
+    let connection = connection::connection_state();
 
     let screen = RwSignal::new(Screen::Main);
     let signing_in = RwSignal::new(false);
@@ -137,6 +138,9 @@ pub fn App() -> impl IntoView {
             if let Some(valid) = page_size::validate_page_size(size) {
                 page_size::page_size().set(valid);
             }
+        }
+        if let Ok(Some(value)) = api::get_active_connection().await {
+            connection.apply_persisted(value);
         }
         if let Ok(Some(acct)) = api::get_session().await {
             account.set(Some(acct));
@@ -266,6 +270,24 @@ fn Main(
     sidebar_toggle: Callback<()>,
     current_section: RwSignal<AppSection>,
 ) -> impl IntoView {
+    // The active connection is a persisted preference. Re-read it from the
+    // backend whenever the user changes sections, so a disconnect made on the
+    // Connect page is honored everywhere across navigation rather than masked
+    // by stale in-memory state. Initial hydration happens in the App bootstrap,
+    // so the first (mount) run is skipped.
+    let connection = connection::connection_state();
+    create_effect(move |prev: Option<AppSection>| {
+        let section = current_section.get();
+        if prev.is_some() {
+            spawn_local(async move {
+                if let Ok(Some(value)) = api::get_active_connection().await {
+                    connection.apply_persisted(value);
+                }
+            });
+        }
+        section
+    });
+
     let sign_out = move |_| {
         // Clear the persisted session on the backend, then drop local state.
         // Without the backend call the account row + keyring token survive, so
