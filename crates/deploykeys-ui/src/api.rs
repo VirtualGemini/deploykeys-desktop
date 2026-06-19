@@ -57,6 +57,75 @@ pub async fn set_active_connection(value: &str) -> Result<(), String> {
     invoke("set_active_connection", &Args { value }).await
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ConnectionDto {
+    pub id: String,
+    pub alias: String,
+    pub kind: String,
+    pub host: Option<String>,
+    pub port: Option<u16>,
+    pub username: Option<String>,
+    pub auth_method: Option<String>,
+    pub key_base_dir: String,
+}
+
+pub async fn list_connections() -> Result<Vec<ConnectionDto>, String> {
+    invoke_no_args("list_connections").await
+}
+
+pub async fn create_remote_connection(
+    alias: String,
+    host: String,
+    port: u16,
+    username: String,
+    auth_method: String,
+    auth_secret: String,
+) -> Result<ConnectionDto, String> {
+    #[derive(Serialize)]
+    #[serde(rename_all = "camelCase")]
+    struct Args {
+        alias: String,
+        host: String,
+        port: u16,
+        username: String,
+        auth_method: String,
+        auth_secret: String,
+    }
+    invoke(
+        "create_remote_connection",
+        &Args {
+            alias,
+            host,
+            port,
+            username,
+            auth_method,
+            auth_secret,
+        },
+    )
+    .await
+}
+
+pub async fn pick_ssh_private_key() -> Result<Option<String>, String> {
+    invoke_no_args("pick_ssh_private_key").await
+}
+
+pub async fn test_connection(id: &str) -> Result<ConnectionDto, String> {
+    #[derive(Serialize)]
+    struct Args<'a> {
+        id: &'a str,
+    }
+    invoke("test_connection", &Args { id }).await
+}
+
+pub async fn delete_connection(id: &str) -> Result<(), String> {
+    #[derive(Serialize)]
+    struct Args<'a> {
+        id: &'a str,
+    }
+    invoke("delete_connection", &Args { id }).await
+}
+
 /// Sign in with a Personal Access Token; returns the account on success.
 pub async fn sign_in_with_token(token: &str) -> Result<Account, String> {
     #[derive(Serialize)]

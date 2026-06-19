@@ -3,7 +3,11 @@ use crate::{
     db::Database,
     github::{CreateDeployKeyRequest, GitHubClient},
     keygen::local::LocalKeyGenerator,
-    models::{DeployKeyPermission, KeyAlgorithm, KeyBinding, KeyBindingStatus, KeyResidency},
+    models::{
+        DeployKeyPermission, KeyAlgorithm, KeyBinding, KeyBindingStatus, KeyResidency, Target,
+        TargetType,
+    },
+    ssh::{dirname_remote_path, quote_shell, run_remote_command},
     Error, Result,
 };
 use chrono::Utc;
@@ -162,26 +166,17 @@ impl KeyBindingService {
             .find_by_id(ssh_key_id)
             .await?
             .ok_or_else(|| Error::NotFound("SSH key not found".into()))?;
+        let target = self
+            .db
+            .targets()
+            .find_by_id(ssh_key.target_id)
+            .await?
+            .ok_or_else(|| Error::NotFound("Target not found".into()))?;
         let stale_binding = self
             .stale_binding_slot(token, &repo.owner, &repo.name, repo.id, ssh_key.target_id)
             .await?;
 
-        if !tokio::fs::try_exists(&ssh_key.private_key_path)
-            .await
-            .unwrap_or(false)
-            || !tokio::fs::try_exists(&ssh_key.public_key_path)
-                .await
-                .unwrap_or(false)
-        {
-            return Err(Error::NotFound(
-                "SSH key directory or key files are missing".into(),
-            ));
-        }
-
-        let public_key = tokio::fs::read_to_string(&ssh_key.public_key_path)
-            .await?
-            .trim()
-            .to_string();
+        let public_key = read_target_public_key(&target, &ssh_key).await?;
         if public_key.is_empty() {
             return Err(Error::Validation("SSH public key is empty".into()));
         }
@@ -209,7 +204,11 @@ impl KeyBindingService {
             public_key,
             public_key_fingerprint: ssh_key.public_key_fingerprint,
             private_key_path: ssh_key.private_key_path,
-            private_key_residency: KeyResidency::Local,
+            private_key_residency: if target.target_type == TargetType::Remote {
+                KeyResidency::Remote
+            } else {
+                KeyResidency::Local
+            },
             status: KeyBindingStatus::Active,
             created_at: Utc::now(),
             last_verified_at: Some(Utc::now()),
@@ -220,7 +219,7 @@ impl KeyBindingService {
             .await
         {
             Ok(binding) => {
-                if let Err(e) = ensure_repo_ssh_config(&repo, &binding).await {
+                if let Err(e) = ensure_repo_ssh_config(&target, &repo, &binding).await {
                     tracing::warn!(
                         "SSH config update failed; rolling back deploy key {} on {}/{}",
                         deploy_key.id,
@@ -316,7 +315,13 @@ impl KeyBindingService {
         let github_key_present = keys
             .iter()
             .any(|k| Some(k.id) == binding.github_deploy_key_id);
-        let local_key_present = tokio::fs::try_exists(&binding.private_key_path)
+        let target = self
+            .db
+            .targets()
+            .find_by_id(binding.target_id)
+            .await?
+            .ok_or_else(|| Error::NotFound("Target not found".into()))?;
+        let local_key_present = target_private_key_exists(&target, &binding.private_key_path)
             .await
             .unwrap_or(false);
 
@@ -435,9 +440,14 @@ async fn remove_local_key_files(private_path: &Path) {
 }
 
 async fn ensure_repo_ssh_config(
+    target: &Target,
     repo: &crate::models::Repository,
     binding: &KeyBinding,
 ) -> Result<()> {
+    if target.target_type == TargetType::Remote {
+        return ensure_remote_repo_ssh_config(target, repo, binding).await;
+    }
+
     let home =
         dirs::home_dir().ok_or_else(|| Error::Other("Could not find home directory".into()))?;
     let ssh_dir = home.join(".ssh");
@@ -482,6 +492,94 @@ async fn ensure_repo_ssh_config(
     }
 
     Ok(())
+}
+
+async fn ensure_remote_repo_ssh_config(
+    target: &Target,
+    repo: &crate::models::Repository,
+    binding: &KeyBinding,
+) -> Result<()> {
+    let marker_id = format!("repo:{}", repo.id);
+    let begin = format!("# >>> deploykeys-desktop {marker_id}");
+    let end = format!("# <<< deploykeys-desktop {marker_id}");
+    let host_alias = repo_ssh_host_alias(repo);
+    let block = format!(
+        "{begin}\n\
+         # Repository: {full_name}\n\
+         Host {host_alias}\n\
+             HostName github.com\n\
+             User git\n\
+             IdentityFile {identity_file}\n\
+             IdentitiesOnly yes\n\
+         {end}\n",
+        full_name = repo.full_name,
+        identity_file = quote_ssh_config_value(&binding.private_key_path),
+    );
+    let sed_range = format!("/^{begin}$/,/^{end}$/d");
+    let script = format!(
+        "set -eu; \
+         mkdir -p ~/.ssh; chmod 700 ~/.ssh; touch ~/.ssh/config; chmod 600 ~/.ssh/config; \
+         tmp=$(mktemp); \
+         sed {sed_range} ~/.ssh/config > \"$tmp\"; \
+         if [ -s \"$tmp\" ]; then printf '\\n' >> \"$tmp\"; fi; \
+         printf '%s\\n' {block} >> \"$tmp\"; \
+         mv \"$tmp\" ~/.ssh/config; chmod 600 ~/.ssh/config",
+        sed_range = quote_shell(&sed_range),
+        block = quote_shell(block.trim_end_matches('\n')),
+    );
+    run_remote_command(target, &script).await?;
+    Ok(())
+}
+
+async fn read_target_public_key(
+    target: &Target,
+    ssh_key: &crate::models::SshKey,
+) -> Result<String> {
+    match target.target_type {
+        TargetType::Local => {
+            if !tokio::fs::try_exists(&ssh_key.private_key_path)
+                .await
+                .unwrap_or(false)
+                || !tokio::fs::try_exists(&ssh_key.public_key_path)
+                    .await
+                    .unwrap_or(false)
+            {
+                return Err(Error::NotFound(
+                    "SSH key directory or key files are missing".into(),
+                ));
+            }
+            Ok(tokio::fs::read_to_string(&ssh_key.public_key_path)
+                .await?
+                .trim()
+                .to_string())
+        }
+        TargetType::Remote => {
+            let dir = dirname_remote_path(&ssh_key.private_key_path).unwrap_or_default();
+            let command = format!(
+                "test -d {dir} && test -f {private_key} && test -f {public_key} && cat {public_key}",
+                dir = quote_shell(&dir),
+                private_key = quote_shell(&ssh_key.private_key_path),
+                public_key = quote_shell(&ssh_key.public_key_path),
+            );
+            Ok(run_remote_command(target, &command)
+                .await?
+                .stdout
+                .trim()
+                .to_string())
+        }
+    }
+}
+
+async fn target_private_key_exists(target: &Target, private_key_path: &str) -> Result<bool> {
+    match target.target_type {
+        TargetType::Local => Ok(tokio::fs::try_exists(private_key_path)
+            .await
+            .unwrap_or(false)),
+        TargetType::Remote => {
+            let command = format!("test -f {}", quote_shell(private_key_path));
+            Ok(run_remote_command(target, &command).await.is_ok())
+        }
+    }
 }
 
 fn repo_ssh_host_alias(repo: &crate::models::Repository) -> String {

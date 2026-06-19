@@ -107,6 +107,27 @@ impl SshKeyRepository {
         row.map(SshKey::try_from).transpose()
     }
 
+    pub async fn find_by_directory_and_target(
+        &self,
+        directory: &str,
+        target_id: i64,
+    ) -> Result<Option<SshKey>> {
+        let row = sqlx::query_as!(
+            SshKeyRow,
+            r#"
+            SELECT id as "id!", directory, algorithm, public_key, public_key_fingerprint,
+                   private_key_path, public_key_path, comment, remark, target_id, created_at
+            FROM ssh_keys WHERE directory = ? AND target_id = ?
+            "#,
+            directory,
+            target_id
+        )
+        .fetch_optional(&self.pool)
+        .await?;
+
+        row.map(SshKey::try_from).transpose()
+    }
+
     pub async fn list_by_target(&self, target_id: i64) -> Result<Vec<SshKey>> {
         let rows = sqlx::query_as!(
             SshKeyRow,

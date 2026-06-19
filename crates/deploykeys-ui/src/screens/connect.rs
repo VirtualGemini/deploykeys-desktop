@@ -9,11 +9,13 @@
 //! filters, scrollable table, pagination) so the two list screens feel
 //! identical.
 
+use crate::api;
 use crate::connection::{connection_state, Connection, ConnectionKind};
 use crate::i18n::t;
 use crate::icons::{Icon, IconName};
 use crate::page_size::page_size;
-use crate::screens::keys::{FilterDropdown, PaginationBar};
+use crate::progress::ProgressHandle;
+use crate::screens::keys::{FilterDropdown, FormSelectDropdown, PaginationBar};
 use crate::toast::ToastHandle;
 use leptos::*;
 use wasm_bindgen::JsCast;
@@ -31,12 +33,15 @@ struct TableDragState {
 fn kind_code(kind: ConnectionKind) -> &'static str {
     match kind {
         ConnectionKind::Local => "local",
+        ConnectionKind::Remote => "remote",
     }
 }
 
 #[component]
 pub fn Connect(#[allow(unused_variables)] pending_count: RwSignal<usize>) -> impl IntoView {
     let state = connection_state();
+    let progress = ProgressHandle::expect();
+    let toast = ToastHandle::expect();
     let connections = state.connections;
     let connected_id = state.connected_id;
 
@@ -46,11 +51,36 @@ pub fn Connect(#[allow(unused_variables)] pending_count: RwSignal<usize>) -> imp
     let page = RwSignal::new(1_usize);
     let table_scroll_ref = NodeRef::<html::Div>::new();
     let table_drag = RwSignal::new(None::<TableDragState>);
+    let add_dialog_open = RwSignal::new(false);
+    let loading = RwSignal::new(false);
+
+    let refresh = move || {
+        if loading.get_untracked() {
+            return;
+        }
+        loading.set(true);
+        let sim = progress.begin_simulated();
+        spawn_local(async move {
+            match api::list_connections().await {
+                Ok(list) => state.set_connections(
+                    list.into_iter()
+                        .map(Connection::from_dto)
+                        .collect::<Vec<_>>(),
+                ),
+                Err(e) => toast.error(e),
+            }
+            loading.set(false);
+            progress.end_simulated(&sim);
+        });
+    };
+
+    create_effect(move |_| refresh());
 
     let type_options = Signal::derive(move || {
         vec![
             (String::new(), t("connect.filter_type_all").to_string()),
             ("local".to_string(), t("connect.type_local").to_string()),
+            ("remote".to_string(), t("connect.type_remote").to_string()),
         ]
     });
     let status_options = Signal::derive(move || {
@@ -77,9 +107,15 @@ pub fn Connect(#[allow(unused_variables)] pending_count: RwSignal<usize>) -> imp
             .get()
             .into_iter()
             .filter(|c| {
-                let name = t(c.kind.name_key()).to_lowercase();
-                let typ = t(c.kind.type_key()).to_lowercase();
-                let matches_query = q.is_empty() || name.contains(&q) || typ.contains(&q);
+                let name = connection_name(c).to_lowercase();
+                let typ = connection_type_label(c.kind).to_lowercase();
+                let host = c.host.clone().unwrap_or_default().to_lowercase();
+                let user = c.username.clone().unwrap_or_default().to_lowercase();
+                let matches_query = q.is_empty()
+                    || name.contains(&q)
+                    || typ.contains(&q)
+                    || host.contains(&q)
+                    || user.contains(&q);
                 let matches_type = type_f.is_empty() || kind_code(c.kind) == type_f;
                 let is_connected = connected.as_deref() == Some(c.id.as_str());
                 let matches_status = status_f.is_empty()
@@ -152,7 +188,7 @@ pub fn Connect(#[allow(unused_variables)] pending_count: RwSignal<usize>) -> imp
                     type="button"
                     title=move || t("connect.add_help")
                     class="shrink-0 py-2 px-4 text-sm font-medium rounded-lg border border-border bg-primary text-on-primary hover:bg-primary-hover focus:outline-none transition-colors disabled:opacity-50"
-                    prop:disabled=true
+                    on:click=move |_| add_dialog_open.set(true)
                 >
                     {move || t("connect.add")}
                 </button>
@@ -263,7 +299,14 @@ pub fn Connect(#[allow(unused_variables)] pending_count: RwSignal<usize>) -> imp
                                         <For
                                             each=move || paged.get()
                                             key=|c| c.id.clone()
-                                            children=move |conn| view! { <ConnectionRow conn=conn /> }
+                                            children=move |conn| {
+                                                view! {
+                                                    <ConnectionRow
+                                                        conn=conn
+                                                        on_changed=Callback::new(move |_| refresh())
+                                                    />
+                                                }
+                                            }
                                         />
                                     </tbody>
                                 </table>
@@ -278,16 +321,33 @@ pub fn Connect(#[allow(unused_variables)] pending_count: RwSignal<usize>) -> imp
                     />
                 </div>
             </Show>
+
+            <AddConnectionDialog
+                open=add_dialog_open
+                on_created=Callback::new(move |_| refresh())
+            />
         </div>
     }
 }
 
 #[component]
-fn ConnectionRow(conn: Connection) -> impl IntoView {
+fn ConnectionRow(conn: Connection, on_changed: Callback<()>) -> impl IntoView {
     let state = connection_state();
+    let progress = ProgressHandle::expect();
+    let toast = ToastHandle::expect();
     let id = conn.id.clone();
-    let name_key = conn.kind.name_key();
-    let type_key = conn.kind.type_key();
+    let name = connection_name(&conn);
+    let type_label = connection_type_label(conn.kind);
+    let subtitle = connection_subtitle(&conn);
+    let has_subtitle = !subtitle.is_empty();
+    let is_local = conn.kind == ConnectionKind::Local;
+    let icon_name = if is_local {
+        IconName::Monitor
+    } else {
+        IconName::Server
+    };
+    let busy = RwSignal::new(false);
+    let delete_confirm_open = RwSignal::new(false);
 
     let is_connected = {
         let id = id.clone();
@@ -296,32 +356,85 @@ fn ConnectionRow(conn: Connection) -> impl IntoView {
 
     let toggle = {
         let id = id.clone();
+        let name = name.clone();
         move |_| {
-            let toast = ToastHandle::expect();
-            let name = t(name_key);
+            if busy.get_untracked() {
+                return;
+            }
             if state.is_connected(&id) {
-                state.disconnect(&id);
-                toast.success(t("connect.disconnect_success").replace("{}", name));
+                busy.set(true);
+                let sim = progress.begin_simulated();
+                let id_for_state = id.clone();
+                let name = name.clone();
+                spawn_local(async move {
+                    match api::set_active_connection("").await {
+                        Ok(()) => {
+                            state.disconnect(&id_for_state);
+                            toast.success(t("connect.disconnect_success").replace("{}", &name));
+                        }
+                        Err(e) => toast.error(e),
+                    }
+                    busy.set(false);
+                    progress.end_simulated(&sim);
+                });
             } else {
-                state.connect(&id);
-                toast.success(t("connect.connect_success").replace("{}", name));
+                busy.set(true);
+                let sim = progress.begin_simulated();
+                let id_for_state = id.clone();
+                let name = name.clone();
+                spawn_local(async move {
+                    match api::set_active_connection(&id_for_state).await {
+                        Ok(()) => {
+                            state.connect(&id_for_state);
+                            toast.success(t("connect.connect_success").replace("{}", &name));
+                        }
+                        Err(e) => toast.error(e),
+                    }
+                    busy.set(false);
+                    progress.end_simulated(&sim);
+                });
             }
         }
     };
-
+    let test = {
+        let id = id.clone();
+        move |_| {
+            if busy.get_untracked() {
+                return;
+            }
+            busy.set(true);
+            let sim = progress.begin_simulated();
+            let id = id.clone();
+            spawn_local(async move {
+                match api::test_connection(&id).await {
+                    Ok(_) => toast.success(t("connect.test_success")),
+                    Err(e) => toast.error(e),
+                }
+                busy.set(false);
+                progress.end_simulated(&sim);
+            });
+        }
+    };
     view! {
         <tr class="group border-b border-border hover:bg-bg align-middle">
             <td class="min-w-[12rem] px-3 py-2 align-middle">
                 <div class="flex items-center gap-2.5 min-w-0">
-                    <Icon name=IconName::Monitor class="size-4 shrink-0 text-muted" />
-                    <span class="block max-w-full truncate whitespace-nowrap font-medium text-content">
-                        {move || t(name_key)}
-                    </span>
+                    <Icon name=icon_name class="size-4 shrink-0 text-muted" />
+                    <div class="min-w-0">
+                        <span class="block max-w-full truncate whitespace-nowrap font-medium text-content">
+                            {name.clone()}
+                        </span>
+                        <Show when=move || has_subtitle>
+                            <span class="block max-w-full truncate whitespace-nowrap text-xs text-muted">
+                                {subtitle.clone()}
+                            </span>
+                        </Show>
+                    </div>
                 </div>
             </td>
             <td class="w-[5rem] min-w-[5rem] px-3 py-2 whitespace-nowrap align-middle">
                 <span class="inline-flex items-center text-[11px] py-0.5 px-2 rounded-full border border-border text-muted">
-                    {move || t(type_key)}
+                    {type_label}
                 </span>
             </td>
             <td class="w-[10rem] min-w-[10rem] px-3 py-2 whitespace-nowrap align-middle">
@@ -357,29 +470,344 @@ fn ConnectionRow(conn: Connection) -> impl IntoView {
                             }
                         }
                         on:click=toggle
+                        prop:disabled=move || busy.get()
                     >
                         <Icon name=IconName::Power class="size-4" />
                     </button>
                     <button
                         type="button"
-                        title=move || t("connect.local_locked")
+                        title=move || t("connect.test")
                         aria-label=move || t("connect.edit")
                         class="inline-flex items-center justify-center size-8 rounded-md text-content hover:bg-primary-soft dark:hover:bg-primary-soft/60 focus:outline-none disabled:opacity-50 disabled:pointer-events-none"
-                        prop:disabled=true
+                        prop:disabled=move || busy.get()
+                        on:click=test
                     >
                         <Icon name=IconName::Edit class="size-4" />
                     </button>
                     <button
                         type="button"
-                        title=move || t("connect.local_locked")
+                        title=move || if is_local { t("connect.local_locked") } else { t("connect.delete") }
                         aria-label=move || t("connect.delete")
                         class="inline-flex items-center justify-center size-8 rounded-md text-red-600 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-950 focus:outline-none disabled:opacity-50 disabled:pointer-events-none"
-                        prop:disabled=true
+                        prop:disabled=move || is_local || busy.get() || is_connected.get()
+                        on:click=move |_| delete_confirm_open.set(true)
                     >
                         <Icon name=IconName::Delete class="size-4" />
                     </button>
                 </div>
             </td>
         </tr>
+
+        <Show when=move || delete_confirm_open.get()>
+            <div class="fixed inset-0 z-[100] bg-black/50 backdrop-blur-sm flex items-center justify-center px-4" on:click=move |_| delete_confirm_open.set(false)>
+                <div class="w-full max-w-md bg-surface border border-border rounded-xl shadow-2xl overflow-hidden" on:click=|ev| ev.stop_propagation()>
+                    <div class="px-6 py-5">
+                        <h2 class="text-base font-semibold text-content">{move || t("connect.delete_confirm_title")}</h2>
+                        <p class="mt-2 text-sm text-muted">{move || t("connect.delete_confirm_message")}</p>
+                    </div>
+                    <div class="flex justify-end gap-2 px-6 py-4 border-t border-border">
+                        <button
+                            type="button"
+                            class="px-4 py-2 text-sm font-medium rounded-lg bg-bg text-content hover:text-primary focus:outline-none"
+                            on:click=move |_| delete_confirm_open.set(false)
+                        >
+                            {move || t("common.cancel")}
+                        </button>
+                        <button
+                            type="button"
+                            class="px-4 py-2 text-sm font-medium rounded-lg bg-red-600 text-white hover:bg-red-700 focus:outline-none"
+                            on:click={
+                                let id = id.clone();
+                                move |_| {
+                                    delete_confirm_open.set(false);
+                                    if busy.get_untracked() {
+                                        return;
+                                    }
+                                    busy.set(true);
+                                    let sim = progress.begin_simulated();
+                                    let id = id.clone();
+                                    spawn_local(async move {
+                                        match api::delete_connection(&id).await {
+                                            Ok(()) => {
+                                                toast.success(t("connect.delete_success"));
+                                                on_changed.call(());
+                                            }
+                                            Err(e) => toast.error(e),
+                                        }
+                                        busy.set(false);
+                                        progress.end_simulated(&sim);
+                                    });
+                                }
+                            }
+                        >
+                            {move || t("common.confirm")}
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </Show>
+    }
+}
+
+fn connection_name(conn: &Connection) -> String {
+    if conn.kind == ConnectionKind::Local {
+        t("connect.local_name").to_string()
+    } else {
+        conn.alias.clone()
+    }
+}
+
+fn connection_type_label(kind: ConnectionKind) -> &'static str {
+    match kind {
+        ConnectionKind::Local => t("connect.type_local"),
+        ConnectionKind::Remote => t("connect.type_remote"),
+    }
+}
+
+fn connection_subtitle(conn: &Connection) -> String {
+    if conn.kind == ConnectionKind::Local {
+        return String::new();
+    }
+    match (&conn.username, &conn.host, conn.port) {
+        (Some(user), Some(host), Some(port)) => format!("{user}@{host}:{port}"),
+        (Some(user), Some(host), None) => format!("{user}@{host}"),
+        (_, Some(host), Some(port)) => format!("{host}:{port}"),
+        (_, Some(host), None) => host.clone(),
+        _ => String::new(),
+    }
+}
+
+#[component]
+fn AddConnectionDialog(open: RwSignal<bool>, on_created: Callback<()>) -> impl IntoView {
+    let progress = ProgressHandle::expect();
+    let toast = ToastHandle::expect();
+    let alias = RwSignal::new(String::new());
+    let host = RwSignal::new(String::new());
+    let port = RwSignal::new("22".to_string());
+    let username = RwSignal::new(String::new());
+    let auth_method = RwSignal::new("password".to_string());
+    let auth_secret = RwSignal::new(String::new());
+    let submitting = RwSignal::new(false);
+    let error = RwSignal::new(None::<String>);
+    let auth_options = Signal::derive(move || {
+        vec![
+            (
+                "password".to_string(),
+                t("connect.auth_password").to_string(),
+            ),
+            ("ssh_key".to_string(), t("connect.auth_ssh_key").to_string()),
+        ]
+    });
+
+    create_effect(move |_| {
+        if open.get() {
+            alias.set(String::new());
+            host.set(String::new());
+            port.set("22".to_string());
+            username.set(String::new());
+            auth_method.set("password".to_string());
+            auth_secret.set(String::new());
+            error.set(None);
+        }
+    });
+
+    let submit = move |_| {
+        let alias_val = alias.get_untracked().trim().to_string();
+        let host_val = host.get_untracked().trim().to_string();
+        let username_val = username.get_untracked().trim().to_string();
+        let auth_method_val = auth_method.get_untracked();
+        let auth_secret_val = auth_secret.get_untracked().trim().to_string();
+        let port_val = match port.get_untracked().trim().parse::<u16>() {
+            Ok(value) if value > 0 => value,
+            _ => {
+                error.set(Some(t("connect.port_invalid").to_string()));
+                return;
+            }
+        };
+
+        if alias_val.is_empty()
+            || host_val.is_empty()
+            || username_val.is_empty()
+            || auth_secret_val.is_empty()
+        {
+            error.set(Some(t("connect.remote_required").to_string()));
+            return;
+        }
+
+        submitting.set(true);
+        error.set(None);
+        let sim = progress.begin_simulated();
+        spawn_local(async move {
+            match api::create_remote_connection(
+                alias_val,
+                host_val,
+                port_val,
+                username_val,
+                auth_method_val,
+                auth_secret_val,
+            )
+            .await
+            {
+                Ok(_) => {
+                    open.set(false);
+                    on_created.call(());
+                    toast.success(t("connect.create_success"));
+                }
+                Err(e) => error.set(Some(e)),
+            }
+            submitting.set(false);
+            progress.end_simulated(&sim);
+        });
+    };
+
+    view! {
+        <div class=move || {
+            if open.get() {
+                "fixed inset-0 z-[100] bg-black/50 backdrop-blur-sm flex items-center justify-center px-4 opacity-100 transition-opacity duration-300"
+            } else {
+                "fixed inset-0 z-[100] bg-black/50 backdrop-blur-sm flex items-center justify-center px-4 opacity-0 pointer-events-none transition-opacity duration-300"
+            }
+        }>
+            <div
+                class="w-full max-w-xl bg-surface border border-border rounded-xl shadow-2xl overflow-hidden"
+                on:click=|ev| ev.stop_propagation()
+            >
+                <div class="px-6 py-5 border-b border-border">
+                    <h2 class="text-base font-semibold text-content">{move || t("connect.dialog_title")}</h2>
+                </div>
+                <div class="px-6 py-5 space-y-4">
+                    <Show when=move || error.get().is_some()>
+                        <div class="p-3 text-sm rounded-lg border border-red-200 bg-red-50 text-red-700 dark:border-red-900 dark:bg-red-950 dark:text-red-300">
+                            {move || error.get().unwrap_or_default()}
+                        </div>
+                    </Show>
+                    <TextInput label_key="connect.alias" value=alias placeholder_key="connect.alias_placeholder" disabled=submitting />
+                    <div class="grid grid-cols-1 sm:grid-cols-5 gap-4">
+                        <div class="sm:col-span-4">
+                            <TextInput label_key="connect.host" value=host placeholder_key="connect.host_placeholder" disabled=submitting />
+                        </div>
+                        <div class="sm:col-span-1">
+                            <TextInput label_key="connect.port" value=port placeholder_key="connect.port_placeholder" disabled=submitting />
+                        </div>
+                    </div>
+                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                        <TextInput label_key="connect.username" value=username placeholder_key="connect.username_placeholder" disabled=submitting />
+                        <div class="min-w-0">
+                            <label class="block text-sm font-medium text-content mb-1.5">{move || t("connect.auth_method")}</label>
+                            <FormSelectDropdown
+                                options=auth_options
+                                selected=Signal::derive(move || auth_method.get())
+                                on_select=Callback::new(move |value| {
+                                    if auth_method.get_untracked() != value {
+                                        auth_method.set(value);
+                                        auth_secret.set(String::new());
+                                    }
+                                })
+                                disabled=Signal::derive(move || submitting.get())
+                            />
+                        </div>
+                    </div>
+                    <Show
+                        when=move || auth_method.get() == "ssh_key"
+                        fallback=move || view! {
+                            <TextInput
+                                label_key="connect.password"
+                                value=auth_secret
+                                placeholder_key="connect.password_placeholder"
+                                input_type="password"
+                                disabled=submitting
+                            />
+                        }
+                    >
+                        <SshKeyFileInput value=auth_secret disabled=submitting error=error />
+                    </Show>
+                </div>
+                <div class="flex justify-end gap-2 px-6 py-4 border-t border-border">
+                    <button
+                        type="button"
+                        class="px-4 py-2 text-sm font-medium rounded-lg bg-bg text-content hover:text-primary focus:outline-none disabled:opacity-50"
+                        on:click=move |_| open.set(false)
+                        prop:disabled=move || submitting.get()
+                    >
+                        {move || t("common.cancel")}
+                    </button>
+                    <button
+                        type="button"
+                        class="px-4 py-2 text-sm font-medium rounded-lg bg-primary text-on-primary hover:bg-primary-hover focus:outline-none disabled:opacity-50"
+                        on:click=submit
+                        prop:disabled=move || submitting.get()
+                    >
+                        {move || if submitting.get() { t("connect.creating") } else { t("connect.create") }}
+                    </button>
+                </div>
+            </div>
+        </div>
+    }
+}
+
+#[component]
+fn SshKeyFileInput(
+    value: RwSignal<String>,
+    disabled: RwSignal<bool>,
+    error: RwSignal<Option<String>>,
+) -> impl IntoView {
+    let choose_file = move |_| {
+        if disabled.get_untracked() {
+            return;
+        }
+        spawn_local(async move {
+            match api::pick_ssh_private_key().await {
+                Ok(Some(path)) => value.set(path),
+                Ok(None) => {}
+                Err(e) => error.set(Some(e)),
+            }
+        });
+    };
+
+    view! {
+        <div class="min-w-0">
+            <label class="block text-sm font-medium text-content mb-1.5">{move || t("connect.private_key_path")}</label>
+            <div class="flex gap-2 min-w-0">
+                <input
+                    type="text"
+                    class="min-w-0 flex-1 py-2 px-3 text-sm rounded-lg border border-border bg-bg text-content placeholder:text-muted focus:outline-none font-mono"
+                    placeholder=move || t("connect.private_key_path_placeholder")
+                    prop:value=move || value.get()
+                    prop:readonly=true
+                    prop:disabled=move || disabled.get()
+                />
+                <button
+                    type="button"
+                    class="shrink-0 px-3 py-2 text-sm font-medium rounded-lg border border-border bg-bg text-content hover:text-primary focus:outline-none disabled:opacity-50"
+                    prop:disabled=move || disabled.get()
+                    on:click=choose_file
+                >
+                    {move || t("connect.choose_private_key")}
+                </button>
+            </div>
+        </div>
+    }
+}
+
+#[component]
+fn TextInput(
+    #[prop(into)] label_key: MaybeSignal<&'static str>,
+    value: RwSignal<String>,
+    #[prop(into)] placeholder_key: MaybeSignal<&'static str>,
+    #[prop(into, default = MaybeSignal::Static("text"))] input_type: MaybeSignal<&'static str>,
+    disabled: RwSignal<bool>,
+) -> impl IntoView {
+    view! {
+        <div class="min-w-0">
+            <label class="block text-sm font-medium text-content mb-1.5">{move || t(label_key.get())}</label>
+            <input
+                type=move || input_type.get()
+                class="w-full py-2 px-3 text-sm rounded-lg border border-border bg-bg text-content placeholder:text-muted focus:outline-none focus:ring-1 focus:ring-primary"
+                placeholder=move || t(placeholder_key.get())
+                prop:value=move || value.get()
+                prop:disabled=move || disabled.get()
+                on:input=move |ev| value.set(event_target_value(&ev))
+            />
+        </div>
     }
 }

@@ -6,7 +6,6 @@
 //! connections arrive in a later stage.
 
 use leptos::*;
-use wasm_bindgen_futures::spawn_local;
 
 /// Stable id of the built-in local connection.
 pub const LOCAL_ID: &str = "local";
@@ -14,35 +13,47 @@ pub const LOCAL_ID: &str = "local";
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ConnectionKind {
     Local,
-}
-
-impl ConnectionKind {
-    /// i18n key for the connection's display name.
-    pub fn name_key(self) -> &'static str {
-        match self {
-            ConnectionKind::Local => "connect.local_name",
-        }
-    }
-
-    /// i18n key for the connection's type label.
-    pub fn type_key(self) -> &'static str {
-        match self {
-            ConnectionKind::Local => "connect.type_local",
-        }
-    }
+    Remote,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Connection {
     pub id: String,
+    pub alias: String,
     pub kind: ConnectionKind,
+    pub host: Option<String>,
+    pub port: Option<u16>,
+    pub username: Option<String>,
+    pub key_base_dir: String,
 }
 
 impl Connection {
     pub fn local() -> Self {
         Self {
             id: LOCAL_ID.to_string(),
+            alias: "Local".to_string(),
             kind: ConnectionKind::Local,
+            host: None,
+            port: None,
+            username: None,
+            key_base_dir: String::new(),
+        }
+    }
+
+    pub fn from_dto(dto: crate::api::ConnectionDto) -> Self {
+        let kind = if dto.kind == "remote" {
+            ConnectionKind::Remote
+        } else {
+            ConnectionKind::Local
+        };
+        Self {
+            id: dto.id,
+            alias: dto.alias,
+            kind,
+            host: dto.host,
+            port: dto.port,
+            username: dto.username,
+            key_base_dir: dto.key_base_dir,
         }
     }
 }
@@ -60,26 +71,13 @@ impl ConnectionState {
     /// Make `id` the single connected connection (disconnects any other).
     pub fn connect(self, id: &str) {
         self.connected_id.set(Some(id.to_string()));
-        self.persist();
     }
 
     /// Take `id` offline if it is the connected one; no-op otherwise.
     pub fn disconnect(self, id: &str) {
         if self.connected_id.get_untracked().as_deref() == Some(id) {
             self.connected_id.set(None);
-            self.persist();
         }
-    }
-
-    /// Write the current connected id to the backend so the choice survives
-    /// navigation and app restarts. An empty string records "all offline".
-    fn persist(self) {
-        let value = self.connected_id.get_untracked().unwrap_or_default();
-        spawn_local(async move {
-            if let Err(e) = crate::api::set_active_connection(&value).await {
-                leptos::logging::warn!("Failed to persist active connection: {e}");
-            }
-        });
     }
 
     /// Apply a persisted value loaded from the backend: empty string = offline.
@@ -98,6 +96,21 @@ impl ConnectionState {
     /// (managing keys, cloning, binding deploy keys) must be blocked.
     pub fn has_active(self) -> bool {
         self.connected_id.get().is_some()
+    }
+
+    pub fn set_connections(self, next: Vec<Connection>) {
+        self.connections.set(next);
+        let active = self.connected_id.get_untracked();
+        if let Some(active) = active {
+            if !self
+                .connections
+                .get_untracked()
+                .iter()
+                .any(|connection| connection.id == active)
+            {
+                self.connected_id.set(None);
+            }
+        }
     }
 }
 

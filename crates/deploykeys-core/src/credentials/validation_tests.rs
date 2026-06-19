@@ -59,8 +59,8 @@ fn token_key_format_is_stable() {
 fn ssh_password_key_format_is_stable() {
     use_mock_keyring();
 
-    let key = CredentialStore::store_ssh_password(42, "test_password").unwrap();
-    assert_eq!(key, "ssh_password_target_42");
+    let key = CredentialStore::store_ssh_password(4242, "test_password").unwrap();
+    assert_eq!(key, "ssh_password_target_4242");
     CredentialStore::delete_credential(&key).unwrap();
 }
 

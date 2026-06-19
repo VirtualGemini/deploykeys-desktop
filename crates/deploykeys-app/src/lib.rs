@@ -8,10 +8,13 @@
 use deploykeys_core::credentials::CredentialStore;
 use deploykeys_core::db::Database;
 use deploykeys_core::models::{
-    Account, DeployKeyPermission, KeyAlgorithm, KeyBinding, KeyBindingStatus, Repository,
+    Account, AuthMethod, DeployKeyPermission, KeyAlgorithm, KeyBinding, KeyBindingStatus,
+    Repository, Target, TargetType,
 };
 use deploykeys_core::progress::{OperationId, ProgressReporter};
-use deploykeys_core::services::{AuthService, KeyBindingService, RepoSyncService, SshKeyService};
+use deploykeys_core::services::{
+    AuthService, KeyBindingService, RepoSyncService, SshKeyService, TargetService,
+};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::io::Write;
@@ -174,6 +177,19 @@ struct SshKeyDto {
     created_at: String,
 }
 
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ConnectionDto {
+    id: String,
+    alias: String,
+    kind: String,
+    host: Option<String>,
+    port: Option<u16>,
+    username: Option<String>,
+    auth_method: Option<String>,
+    key_base_dir: String,
+}
+
 /// Payload sent to the webview for each progress checkpoint.
 #[derive(Clone, Serialize)]
 struct ProgressEvent {
@@ -277,9 +293,114 @@ async fn get_active_connection(state: State<'_, AppState>) -> Result<Option<Stri
 /// connections are offline.
 #[tauri::command]
 async fn set_active_connection(state: State<'_, AppState>, value: String) -> Result<(), String> {
+    if !value.is_empty() {
+        resolve_connection_target(&state.db, &value)
+            .await
+            .map_err(|e| e.to_string())?;
+        if let Some(target_id) = remote_connection_target_id(&value)? {
+            let service = TargetService::new(state.db.clone());
+            service
+                .check_target(target_id)
+                .await
+                .map_err(|e| e.to_string())?;
+        }
+    }
+
     state
         .db
         .set_setting(ACTIVE_CONNECTION_SETTING_KEY, &value)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn list_connections(state: State<'_, AppState>) -> Result<Vec<ConnectionDto>, String> {
+    let service = TargetService::new(state.db.clone());
+    let targets = service.list_targets().await.map_err(|e| e.to_string())?;
+    Ok(targets.into_iter().map(connection_dto).collect())
+}
+
+#[tauri::command]
+async fn create_remote_connection(
+    state: State<'_, AppState>,
+    alias: String,
+    host: String,
+    port: u16,
+    username: String,
+    auth_method: String,
+    auth_secret: String,
+) -> Result<ConnectionDto, String> {
+    let auth_method: AuthMethod = auth_method
+        .parse()
+        .map_err(|e| format!("Invalid auth method: {e}"))?;
+    let service = TargetService::new(state.db.clone());
+    let target = service
+        .create_remote_target(
+            alias,
+            host,
+            port,
+            username,
+            auth_method,
+            auth_secret,
+            String::new(),
+        )
+        .await
+        .map_err(|e| e.to_string())?;
+    Ok(connection_dto(target))
+}
+
+#[tauri::command]
+async fn pick_ssh_private_key(app: AppHandle) -> Result<Option<String>, String> {
+    let Some(path) = app
+        .dialog()
+        .file()
+        .set_title("Select SSH private key")
+        .blocking_pick_file()
+    else {
+        return Ok(None);
+    };
+    Ok(Some(
+        path.into_path()
+            .map_err(|e| e.to_string())?
+            .to_string_lossy()
+            .to_string(),
+    ))
+}
+
+#[tauri::command]
+async fn test_connection(state: State<'_, AppState>, id: String) -> Result<ConnectionDto, String> {
+    let target = resolve_connection_target(&state.db, &id)
+        .await
+        .map_err(|e| e.to_string())?;
+    if target.target_type == TargetType::Remote {
+        let service = TargetService::new(state.db.clone());
+        let checked = service
+            .check_target(target.id)
+            .await
+            .map_err(|e| e.to_string())?;
+        return Ok(connection_dto(checked));
+    }
+    Ok(connection_dto(target))
+}
+
+#[tauri::command]
+async fn delete_connection(state: State<'_, AppState>, id: String) -> Result<(), String> {
+    let Some(target_id) = remote_connection_target_id(&id)? else {
+        return Err("The local connection cannot be deleted".to_string());
+    };
+
+    let active = state
+        .db
+        .get_setting(ACTIVE_CONNECTION_SETTING_KEY)
+        .await
+        .map_err(|e| e.to_string())?;
+    if active.as_deref() == Some(id.as_str()) {
+        return Err("Disconnect the connection before deleting it".to_string());
+    }
+
+    let service = TargetService::new(state.db.clone());
+    service
+        .delete_remote_target(target_id)
         .await
         .map_err(|e| e.to_string())
 }
@@ -384,16 +505,20 @@ async fn sync_repositories(
     Ok(SyncSummaryDto { repositories })
 }
 
-/// List all SSH keys for the local target.
+/// List SSH keys for the active target.
 #[tauri::command]
 async fn list_ssh_keys(state: State<'_, AppState>) -> Result<Vec<SshKeyDto>, String> {
+    let target = active_target(&state).await?;
     let service = SshKeyService::new(state.db.clone());
-    let keys = service.list_all_keys().await.map_err(|e| e.to_string())?;
+    let keys = service
+        .list_keys(target.id)
+        .await
+        .map_err(|e| e.to_string())?;
 
     Ok(keys.into_iter().map(ssh_key_dto).collect())
 }
 
-/// Create a new SSH key pair.
+/// Create a new SSH key pair on the active target.
 #[tauri::command]
 async fn create_ssh_key(
     state: State<'_, AppState>,
@@ -406,9 +531,10 @@ async fn create_ssh_key(
         .parse()
         .map_err(|e| format!("Invalid algorithm: {}", e))?;
 
+    let target = active_target(&state).await?;
     let service = SshKeyService::new(state.db.clone());
     let key = service
-        .create_key(directory, algo, comment, remark)
+        .create_key_for_target(target.id, directory, algo, comment, remark)
         .await
         .map_err(|e| e.to_string())?;
 
@@ -418,6 +544,7 @@ async fn create_ssh_key(
 /// Delete an SSH key and its files.
 #[tauri::command]
 async fn delete_ssh_key(state: State<'_, AppState>, id: i64) -> Result<(), String> {
+    ensure_key_belongs_to_active_target(&state, id).await?;
     let service = SshKeyService::new(state.db.clone());
     service.delete_key(id).await.map_err(|e| e.to_string())
 }
@@ -431,6 +558,7 @@ async fn update_ssh_key(
     directory: String,
     remark: String,
 ) -> Result<SshKeyDto, String> {
+    ensure_key_belongs_to_active_target(&state, id).await?;
     let service = SshKeyService::new(state.db.clone());
     let key = service
         .update_key(id, &directory, &remark)
@@ -443,6 +571,7 @@ async fn update_ssh_key(
 /// Get the public key file content for copying to clipboard.
 #[tauri::command]
 async fn get_public_key_content(state: State<'_, AppState>, id: i64) -> Result<String, String> {
+    ensure_key_belongs_to_active_target(&state, id).await?;
     let service = SshKeyService::new(state.db.clone());
     service.read_public_key(id).await.map_err(|e| e.to_string())
 }
@@ -450,6 +579,7 @@ async fn get_public_key_content(state: State<'_, AppState>, id: i64) -> Result<S
 /// Read a public key and write it to the system clipboard.
 #[tauri::command]
 async fn copy_public_key_to_clipboard(state: State<'_, AppState>, id: i64) -> Result<(), String> {
+    ensure_key_belongs_to_active_target(&state, id).await?;
     let service = SshKeyService::new(state.db.clone());
     let content = service
         .read_public_key(id)
@@ -464,6 +594,7 @@ async fn copy_public_key_to_clipboard(state: State<'_, AppState>, id: i64) -> Re
 /// Check whether the key's directory and expected key files still exist.
 #[tauri::command]
 async fn ssh_key_files_exist(state: State<'_, AppState>, id: i64) -> Result<bool, String> {
+    ensure_key_belongs_to_active_target(&state, id).await?;
     let service = SshKeyService::new(state.db.clone());
     service.key_files_exist(id).await.map_err(|e| e.to_string())
 }
@@ -541,6 +672,7 @@ async fn bind_deploy_key(
     ssh_key_id: i64,
     writable: bool,
 ) -> Result<(), String> {
+    ensure_key_belongs_to_active_target(&state, ssh_key_id).await?;
     let repo = state
         .db
         .repositories()
@@ -735,6 +867,85 @@ fn ssh_key_dto(key: deploykeys_core::models::SshKey) -> SshKeyDto {
         remark: key.remark,
         created_at: key.created_at.format("%Y-%m-%d %H:%M:%S").to_string(),
     }
+}
+
+fn connection_dto(target: Target) -> ConnectionDto {
+    let id = if target.target_type == TargetType::Local {
+        "local".to_string()
+    } else {
+        format!("target:{}", target.id)
+    };
+
+    ConnectionDto {
+        id,
+        alias: target.alias,
+        kind: target.target_type.to_string(),
+        host: target.host,
+        port: target.port,
+        username: target.username,
+        auth_method: target.auth_method.map(|method| method.to_string()),
+        key_base_dir: target.key_base_dir,
+    }
+}
+
+async fn active_target(state: &AppState) -> Result<Target, String> {
+    let value = state
+        .db
+        .get_setting(ACTIVE_CONNECTION_SETTING_KEY)
+        .await
+        .map_err(|e| e.to_string())?
+        .unwrap_or_else(|| "local".to_string());
+    if value.is_empty() {
+        return Err("No active connection. Connect an environment first.".to_string());
+    }
+    resolve_connection_target(&state.db, &value)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+async fn resolve_connection_target(db: &Database, value: &str) -> deploykeys_core::Result<Target> {
+    if value == "local" {
+        return TargetService::new(db.clone()).ensure_local_target().await;
+    }
+
+    let Some(id) =
+        remote_connection_target_id(value).map_err(deploykeys_core::Error::Validation)?
+    else {
+        return Err(deploykeys_core::Error::Validation(format!(
+            "Invalid connection id: {value}"
+        )));
+    };
+    db.targets()
+        .find_by_id(id)
+        .await?
+        .ok_or_else(|| deploykeys_core::Error::NotFound("Connection not found".into()))
+}
+
+fn remote_connection_target_id(value: &str) -> Result<Option<i64>, String> {
+    let Some(raw) = value.strip_prefix("target:") else {
+        return Ok(None);
+    };
+    raw.parse::<i64>()
+        .map(Some)
+        .map_err(|_| format!("Invalid connection id: {value}"))
+}
+
+async fn ensure_key_belongs_to_active_target(
+    state: &AppState,
+    key_id: i64,
+) -> Result<Target, String> {
+    let target = active_target(state).await?;
+    let key = state
+        .db
+        .ssh_keys()
+        .find_by_id(key_id)
+        .await
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| "SSH key not found".to_string())?;
+    if key.target_id != target.id {
+        return Err("SSH key does not belong to the active connection".to_string());
+    }
+    Ok(target)
 }
 
 /// Get the active session's access token: from the in-memory cache if present,
@@ -1566,6 +1777,11 @@ pub fn run() {
             set_page_size,
             get_active_connection,
             set_active_connection,
+            list_connections,
+            create_remote_connection,
+            pick_ssh_private_key,
+            test_connection,
+            delete_connection,
             sign_in_with_token,
             open_url,
             sign_out,

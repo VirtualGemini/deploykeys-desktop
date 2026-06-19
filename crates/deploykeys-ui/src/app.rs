@@ -142,6 +142,13 @@ pub fn App() -> impl IntoView {
                 page_size::page_size().set(valid);
             }
         }
+        if let Ok(list) = api::list_connections().await {
+            connection.set_connections(
+                list.into_iter()
+                    .map(connection::Connection::from_dto)
+                    .collect(),
+            );
+        }
         if let Ok(Some(value)) = api::get_active_connection().await {
             connection.apply_persisted(value);
         }

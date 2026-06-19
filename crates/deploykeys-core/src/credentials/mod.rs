@@ -97,6 +97,15 @@ impl CredentialStore {
         validate_secret(password, "password")?;
 
         let key = format!("ssh_password_target_{}", target_id);
+        Self::store_ssh_password_ref(&key, password)
+    }
+
+    /// Store SSH password under an explicit reference key.
+    pub fn store_ssh_password_ref(ref_key: &str, password: &str) -> Result<String> {
+        validate_ref_key(ref_key)?;
+        validate_secret(password, "password")?;
+
+        let key = ref_key.to_string();
         let entry = Entry::new(Self::SERVICE_NAME, &key)?;
         entry.set_password(password)?;
         Ok(key)
@@ -155,6 +164,19 @@ fn validate_target_id(target_id: i64) -> Result<()> {
     if target_id <= 0 {
         return Err(crate::Error::Validation(
             "target_id must be positive".to_string(),
+        ));
+    }
+    Ok(())
+}
+
+fn validate_ref_key(ref_key: &str) -> Result<()> {
+    if ref_key.is_empty()
+        || !ref_key
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '-' | '.'))
+    {
+        return Err(crate::Error::Validation(
+            "credential reference key is invalid".to_string(),
         ));
     }
     Ok(())
