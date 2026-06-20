@@ -670,6 +670,11 @@ mod tests {
 
     async fn seeded(db: &Database) -> (i64, i64, i64) {
         let account_id = seed_account(db).await;
+        let mut account = db.accounts().find_by_id(account_id).await.unwrap().unwrap();
+        account.token_ref =
+            CredentialStore::store_token(&account.login, "ghu_seeded_token").unwrap();
+        db.accounts().update(&account).await.unwrap();
+
         let repo_id = seed_repository(db, account_id).await;
         let target_id = seed_target(db).await;
         (account_id, repo_id, target_id)
@@ -680,9 +685,6 @@ mod tests {
         use_mock_keyring();
         let (_dir, db) = test_db().await;
         let (account_id, repo_id, target_id) = seeded(&db).await;
-        let account = db.accounts().find_by_id(account_id).await.unwrap().unwrap();
-        CredentialStore::store_token("seeded", "ghu_seeded_token").unwrap();
-        assert_eq!(account.token_ref, "github_token_seeded");
 
         let mut server = mockito::Server::new_async().await;
         let upload = server
@@ -737,7 +739,6 @@ mod tests {
         use_mock_keyring();
         let (_dir, db) = test_db().await;
         let (account_id, repo_id, target_id) = seeded(&db).await;
-        CredentialStore::store_token("seeded", "ghu_seeded_token").unwrap();
 
         let mut server = mockito::Server::new_async().await;
         server
@@ -786,7 +787,6 @@ mod tests {
         use_mock_keyring();
         let (_dir, db) = test_db().await;
         let (account_id, repo_id, target_id) = seeded(&db).await;
-        CredentialStore::store_token("seeded", "ghu_seeded_token").unwrap();
 
         let binding = KeyBinding {
             id: 0,
@@ -844,7 +844,6 @@ mod tests {
         use_mock_keyring();
         let (_dir, db) = test_db().await;
         let (account_id, repo_id, target_id) = seeded(&db).await;
-        CredentialStore::store_token("seeded", "ghu_seeded_token").unwrap();
 
         let stale = KeyBinding {
             id: 0,
@@ -927,7 +926,6 @@ mod tests {
         use_mock_keyring();
         let (_dir, db) = test_db().await;
         let (_account_id, repo_id, target_id) = seeded(&db).await;
-        CredentialStore::store_token("seeded", "ghu_seeded_token").unwrap();
 
         // A local key file that exists.
         let key_dir = tempfile::TempDir::new().unwrap();
@@ -981,7 +979,6 @@ mod tests {
         use_mock_keyring();
         let (_dir, db) = test_db().await;
         let (_account_id, repo_id, target_id) = seeded(&db).await;
-        CredentialStore::store_token("seeded", "ghu_seeded_token").unwrap();
 
         let binding = KeyBinding {
             id: 0,
