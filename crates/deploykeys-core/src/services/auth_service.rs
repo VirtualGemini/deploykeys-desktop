@@ -157,7 +157,7 @@ mod tests {
         assert!(account.id > 0);
         assert_eq!(account.login, "octo-create");
         assert_eq!(account.github_user_id, 4242);
-        assert_eq!(account.token_ref, "github_token_octo-create");
+        assert!(account.token_ref.starts_with("github_token_octo-create_"));
         assert_eq!(account.auth_type, AuthType::PersonalAccessToken);
 
         // Token is retrievable through the stored reference.
@@ -194,6 +194,10 @@ mod tests {
 
         let all = db.accounts().list_all().await.unwrap();
         assert_eq!(all.len(), 1);
+        assert_ne!(
+            first.token_ref, second.token_ref,
+            "re-login must create a new keychain item instead of updating the old one"
+        );
 
         let stored = CredentialStore::get_token(&second.token_ref).unwrap();
         assert_eq!(stored, "ghp_second");

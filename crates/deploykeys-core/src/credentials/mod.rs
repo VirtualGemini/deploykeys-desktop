@@ -1,5 +1,6 @@
 use crate::Result;
 use keyring::Entry;
+use rand::{distributions::Alphanumeric, Rng};
 
 pub mod file_store;
 
@@ -22,7 +23,14 @@ impl CredentialStore {
         validate_login(account_login)?;
         validate_secret(token, "token")?;
 
-        let key = format!("github_token_{}", account_login);
+        // Avoid updating an existing macOS Keychain item: update can prompt once
+        // to read the old item and again to modify it for ad-hoc signed builds.
+        let suffix: String = rand::thread_rng()
+            .sample_iter(&Alphanumeric)
+            .take(16)
+            .map(char::from)
+            .collect();
+        let key = format!("github_token_{}_{}", account_login, suffix);
         let entry = Entry::new(Self::SERVICE_NAME, &key)?;
         entry.set_password(token)?;
         Ok(key)
@@ -161,7 +169,7 @@ mod tests {
         use_mock_keyring();
 
         let token_ref = CredentialStore::store_token("test_user", "ghu_test_token_123").unwrap();
-        assert_eq!(token_ref, "github_token_test_user");
+        assert!(token_ref.starts_with("github_token_test_user_"));
 
         let retrieved = CredentialStore::get_token(&token_ref).unwrap();
         assert_eq!(retrieved, "ghu_test_token_123");

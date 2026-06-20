@@ -47,11 +47,11 @@ fn non_positive_target_ids_are_rejected() {
 }
 
 #[test]
-fn token_key_format_is_stable() {
+fn token_key_format_uses_unique_login_prefix() {
     use_mock_keyring();
 
     let key = CredentialStore::store_token("testuser", "test_token_12345").unwrap();
-    assert_eq!(key, "github_token_testuser");
+    assert!(key.starts_with("github_token_testuser_"));
     CredentialStore::delete_token(&key).unwrap();
 }
 

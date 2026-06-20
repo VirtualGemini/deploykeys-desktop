@@ -664,7 +664,21 @@ async fn sign_in_with_token(
             return Err(e.to_string());
         }
     };
-    state.cache_token(token);
+    state.cache_token(token.clone());
+
+    match state.db.repositories().list_by_account(account.id).await {
+        Ok(existing) if existing.is_empty() => match RepoSyncService::new(state.db.clone()) {
+            Ok(sync_service) => {
+                if let Err(e) = sync_service.sync_repos(account.id, &token, &reporter).await {
+                    tracing::warn!("Initial repository sync after sign-in failed: {}", e);
+                }
+            }
+            Err(e) => tracing::warn!("Could not create repo sync service: {}", e),
+        },
+        Ok(_) => {}
+        Err(e) => tracing::warn!("Could not check repositories after sign-in: {}", e),
+    }
+
     Ok(AccountDto {
         login: account.login,
         avatar_url: account.avatar_url,
