@@ -1809,6 +1809,54 @@ const JA: &[(&str, &str)] = &[
     ("keys.dialog_title_edit", "SSH キーを編集"),
     ("keys.dialog_edit_submit", "保存"),
     ("keys.dialog_editing", "保存中…"),
+    ("tutorial.open", "初心者向けチュートリアル"),
+    ("tutorial.close", "チュートリアルを閉じる"),
+    ("tutorial.skip", "スキップ"),
+    ("tutorial.previous", "前へ"),
+    ("tutorial.next", "次へ"),
+    ("tutorial.finish", "完了"),
+    ("tutorial.step_count", "{total} ステップ中 {current} ステップ目"),
+    ("tutorial.demo_ready", "準備完了"),
+    ("tutorial.signin.title", "サインイン"),
+    (
+        "tutorial.signin.body",
+        "GitHub のサインイン入口から開始します。このチュートリアルは流れを示すだけで、トークンは送信しません。",
+    ),
+    ("tutorial.sync.title", "リポジトリを同期"),
+    (
+        "tutorial.sync.body",
+        "サインイン後、GitHub のリポジトリ一覧を同期して、Deploy Key の操作対象を用意します。",
+    ),
+    ("tutorial.connect.title", "環境に接続"),
+    (
+        "tutorial.connect.body",
+        "ローカルマシンまたはサーバー接続を選択します。キー、クローンタスク、リモート確認は有効な接続を使用します。",
+    ),
+    ("tutorial.create_key.title", "キーを作成"),
+    (
+        "tutorial.create_key.body",
+        "有効な接続上で SSH キーを作成します。このキーは後でリポジトリに Deploy Key として追加できます。",
+    ),
+    ("tutorial.bind_key.title", "キーを割り当て"),
+    (
+        "tutorial.bind_key.body",
+        "リポジトリ一覧に戻り、対象リポジトリへ SSH キーを Pull または Push 権限で割り当てます。",
+    ),
+    ("tutorial.clone_repo.title", "リポジトリをクローン"),
+    (
+        "tutorial.clone_repo.body",
+        "Deploy Key の準備ができたら、有効な環境へリポジトリをクローンします。",
+    ),
+    ("tutorial.connect_repo.title", "リポジトリを接続"),
+    (
+        "tutorial.connect_repo.body",
+        "クローン済みリポジトリを接続し、DeployKeys が選択した環境経由で管理できるようにします。",
+    ),
+    ("tutorial.test_repo.title", "リポジトリをテスト"),
+    (
+        "tutorial.test_repo.body",
+        "最後にリポジトリ接続をテストします。パス、キー、リモートアクセスが揃っていることを確認します。",
+    ),
 ];
 
 const ES: &[(&str, &str)] = &[
@@ -2085,6 +2133,54 @@ const ES: &[(&str, &str)] = &[
     ("keys.dialog_title_edit", "Editar clave SSH"),
     ("keys.dialog_edit_submit", "Guardar"),
     ("keys.dialog_editing", "Guardando…"),
+    ("tutorial.open", "Beginner tutorial"),
+    ("tutorial.close", "Close tutorial"),
+    ("tutorial.skip", "Skip"),
+    ("tutorial.previous", "Previous"),
+    ("tutorial.next", "Next"),
+    ("tutorial.finish", "Finish"),
+    ("tutorial.step_count", "Step {current} of {total}"),
+    ("tutorial.demo_ready", "Ready"),
+    ("tutorial.signin.title", "Sign in"),
+    (
+        "tutorial.signin.body",
+        "Start from the GitHub sign-in entry. This tutorial only demonstrates the flow and does not submit a token.",
+    ),
+    ("tutorial.sync.title", "Sync repositories"),
+    (
+        "tutorial.sync.body",
+        "After sign-in, sync the GitHub repository list so deploy-key actions have repositories to work with.",
+    ),
+    ("tutorial.connect.title", "Connect an environment"),
+    (
+        "tutorial.connect.body",
+        "Choose the local machine or a server connection. Keys, clone tasks, and remote checks use the active connection.",
+    ),
+    ("tutorial.create_key.title", "Create a key"),
+    (
+        "tutorial.create_key.body",
+        "Create an SSH key on the active connection. The key can later be attached to a repository as a deploy key.",
+    ),
+    ("tutorial.bind_key.title", "Bind the key"),
+    (
+        "tutorial.bind_key.body",
+        "Return to the repository list and bind the SSH key to the target repository with pull or push authorization.",
+    ),
+    ("tutorial.clone_repo.title", "Clone repository"),
+    (
+        "tutorial.clone_repo.body",
+        "Clone the repository to the active environment after the deploy key is ready.",
+    ),
+    ("tutorial.connect_repo.title", "Connect repository"),
+    (
+        "tutorial.connect_repo.body",
+        "Connect the cloned repository so DeployKeys can manage it through the selected environment.",
+    ),
+    ("tutorial.test_repo.title", "Test repository"),
+    (
+        "tutorial.test_repo.body",
+        "Finish by testing the repository connection. This confirms the path, key, and remote access are aligned.",
+    ),
 ];
 
 const AR: &[(&str, &str)] = &[
@@ -2361,6 +2457,54 @@ const AR: &[(&str, &str)] = &[
     ("keys.dialog_title_edit", "تحرير مفتاح SSH"),
     ("keys.dialog_edit_submit", "حفظ"),
     ("keys.dialog_editing", "جارٍ الحفظ…"),
+    ("tutorial.open", "Beginner tutorial"),
+    ("tutorial.close", "Close tutorial"),
+    ("tutorial.skip", "Skip"),
+    ("tutorial.previous", "Previous"),
+    ("tutorial.next", "Next"),
+    ("tutorial.finish", "Finish"),
+    ("tutorial.step_count", "Step {current} of {total}"),
+    ("tutorial.demo_ready", "Ready"),
+    ("tutorial.signin.title", "Sign in"),
+    (
+        "tutorial.signin.body",
+        "Start from the GitHub sign-in entry. This tutorial only demonstrates the flow and does not submit a token.",
+    ),
+    ("tutorial.sync.title", "Sync repositories"),
+    (
+        "tutorial.sync.body",
+        "After sign-in, sync the GitHub repository list so deploy-key actions have repositories to work with.",
+    ),
+    ("tutorial.connect.title", "Connect an environment"),
+    (
+        "tutorial.connect.body",
+        "Choose the local machine or a server connection. Keys, clone tasks, and remote checks use the active connection.",
+    ),
+    ("tutorial.create_key.title", "Create a key"),
+    (
+        "tutorial.create_key.body",
+        "Create an SSH key on the active connection. The key can later be attached to a repository as a deploy key.",
+    ),
+    ("tutorial.bind_key.title", "Bind the key"),
+    (
+        "tutorial.bind_key.body",
+        "Return to the repository list and bind the SSH key to the target repository with pull or push authorization.",
+    ),
+    ("tutorial.clone_repo.title", "Clone repository"),
+    (
+        "tutorial.clone_repo.body",
+        "Clone the repository to the active environment after the deploy key is ready.",
+    ),
+    ("tutorial.connect_repo.title", "Connect repository"),
+    (
+        "tutorial.connect_repo.body",
+        "Connect the cloned repository so DeployKeys can manage it through the selected environment.",
+    ),
+    ("tutorial.test_repo.title", "Test repository"),
+    (
+        "tutorial.test_repo.body",
+        "Finish by testing the repository connection. This confirms the path, key, and remote access are aligned.",
+    ),
 ];
 
 const PT: &[(&str, &str)] = &[
@@ -2637,6 +2781,54 @@ const PT: &[(&str, &str)] = &[
     ("keys.dialog_title_edit", "Editar chave SSH"),
     ("keys.dialog_edit_submit", "Salvar"),
     ("keys.dialog_editing", "Salvando…"),
+    ("tutorial.open", "Beginner tutorial"),
+    ("tutorial.close", "Close tutorial"),
+    ("tutorial.skip", "Skip"),
+    ("tutorial.previous", "Previous"),
+    ("tutorial.next", "Next"),
+    ("tutorial.finish", "Finish"),
+    ("tutorial.step_count", "Step {current} of {total}"),
+    ("tutorial.demo_ready", "Ready"),
+    ("tutorial.signin.title", "Sign in"),
+    (
+        "tutorial.signin.body",
+        "Start from the GitHub sign-in entry. This tutorial only demonstrates the flow and does not submit a token.",
+    ),
+    ("tutorial.sync.title", "Sync repositories"),
+    (
+        "tutorial.sync.body",
+        "After sign-in, sync the GitHub repository list so deploy-key actions have repositories to work with.",
+    ),
+    ("tutorial.connect.title", "Connect an environment"),
+    (
+        "tutorial.connect.body",
+        "Choose the local machine or a server connection. Keys, clone tasks, and remote checks use the active connection.",
+    ),
+    ("tutorial.create_key.title", "Create a key"),
+    (
+        "tutorial.create_key.body",
+        "Create an SSH key on the active connection. The key can later be attached to a repository as a deploy key.",
+    ),
+    ("tutorial.bind_key.title", "Bind the key"),
+    (
+        "tutorial.bind_key.body",
+        "Return to the repository list and bind the SSH key to the target repository with pull or push authorization.",
+    ),
+    ("tutorial.clone_repo.title", "Clone repository"),
+    (
+        "tutorial.clone_repo.body",
+        "Clone the repository to the active environment after the deploy key is ready.",
+    ),
+    ("tutorial.connect_repo.title", "Connect repository"),
+    (
+        "tutorial.connect_repo.body",
+        "Connect the cloned repository so DeployKeys can manage it through the selected environment.",
+    ),
+    ("tutorial.test_repo.title", "Test repository"),
+    (
+        "tutorial.test_repo.body",
+        "Finish by testing the repository connection. This confirms the path, key, and remote access are aligned.",
+    ),
 ];
 
 const ID: &[(&str, &str)] = &[
@@ -2913,6 +3105,54 @@ const ID: &[(&str, &str)] = &[
     ("keys.dialog_title_edit", "Sunting Kunci SSH"),
     ("keys.dialog_edit_submit", "Simpan"),
     ("keys.dialog_editing", "Menyimpan…"),
+    ("tutorial.open", "Beginner tutorial"),
+    ("tutorial.close", "Close tutorial"),
+    ("tutorial.skip", "Skip"),
+    ("tutorial.previous", "Previous"),
+    ("tutorial.next", "Next"),
+    ("tutorial.finish", "Finish"),
+    ("tutorial.step_count", "Step {current} of {total}"),
+    ("tutorial.demo_ready", "Ready"),
+    ("tutorial.signin.title", "Sign in"),
+    (
+        "tutorial.signin.body",
+        "Start from the GitHub sign-in entry. This tutorial only demonstrates the flow and does not submit a token.",
+    ),
+    ("tutorial.sync.title", "Sync repositories"),
+    (
+        "tutorial.sync.body",
+        "After sign-in, sync the GitHub repository list so deploy-key actions have repositories to work with.",
+    ),
+    ("tutorial.connect.title", "Connect an environment"),
+    (
+        "tutorial.connect.body",
+        "Choose the local machine or a server connection. Keys, clone tasks, and remote checks use the active connection.",
+    ),
+    ("tutorial.create_key.title", "Create a key"),
+    (
+        "tutorial.create_key.body",
+        "Create an SSH key on the active connection. The key can later be attached to a repository as a deploy key.",
+    ),
+    ("tutorial.bind_key.title", "Bind the key"),
+    (
+        "tutorial.bind_key.body",
+        "Return to the repository list and bind the SSH key to the target repository with pull or push authorization.",
+    ),
+    ("tutorial.clone_repo.title", "Clone repository"),
+    (
+        "tutorial.clone_repo.body",
+        "Clone the repository to the active environment after the deploy key is ready.",
+    ),
+    ("tutorial.connect_repo.title", "Connect repository"),
+    (
+        "tutorial.connect_repo.body",
+        "Connect the cloned repository so DeployKeys can manage it through the selected environment.",
+    ),
+    ("tutorial.test_repo.title", "Test repository"),
+    (
+        "tutorial.test_repo.body",
+        "Finish by testing the repository connection. This confirms the path, key, and remote access are aligned.",
+    ),
 ];
 
 const KO: &[(&str, &str)] = &[
@@ -3279,6 +3519,54 @@ const KO: &[(&str, &str)] = &[
     ("keys.dialog_title_edit", "SSH 키 편집"),
     ("keys.dialog_edit_submit", "저장"),
     ("keys.dialog_editing", "저장 중…"),
+    ("tutorial.open", "Beginner tutorial"),
+    ("tutorial.close", "Close tutorial"),
+    ("tutorial.skip", "Skip"),
+    ("tutorial.previous", "Previous"),
+    ("tutorial.next", "Next"),
+    ("tutorial.finish", "Finish"),
+    ("tutorial.step_count", "Step {current} of {total}"),
+    ("tutorial.demo_ready", "Ready"),
+    ("tutorial.signin.title", "Sign in"),
+    (
+        "tutorial.signin.body",
+        "Start from the GitHub sign-in entry. This tutorial only demonstrates the flow and does not submit a token.",
+    ),
+    ("tutorial.sync.title", "Sync repositories"),
+    (
+        "tutorial.sync.body",
+        "After sign-in, sync the GitHub repository list so deploy-key actions have repositories to work with.",
+    ),
+    ("tutorial.connect.title", "Connect an environment"),
+    (
+        "tutorial.connect.body",
+        "Choose the local machine or a server connection. Keys, clone tasks, and remote checks use the active connection.",
+    ),
+    ("tutorial.create_key.title", "Create a key"),
+    (
+        "tutorial.create_key.body",
+        "Create an SSH key on the active connection. The key can later be attached to a repository as a deploy key.",
+    ),
+    ("tutorial.bind_key.title", "Bind the key"),
+    (
+        "tutorial.bind_key.body",
+        "Return to the repository list and bind the SSH key to the target repository with pull or push authorization.",
+    ),
+    ("tutorial.clone_repo.title", "Clone repository"),
+    (
+        "tutorial.clone_repo.body",
+        "Clone the repository to the active environment after the deploy key is ready.",
+    ),
+    ("tutorial.connect_repo.title", "Connect repository"),
+    (
+        "tutorial.connect_repo.body",
+        "Connect the cloned repository so DeployKeys can manage it through the selected environment.",
+    ),
+    ("tutorial.test_repo.title", "Test repository"),
+    (
+        "tutorial.test_repo.body",
+        "Finish by testing the repository connection. This confirms the path, key, and remote access are aligned.",
+    ),
 ];
 
 const FR: &[(&str, &str)] = &[
@@ -3555,6 +3843,54 @@ const FR: &[(&str, &str)] = &[
     ("keys.dialog_title_edit", "Modifier la clé SSH"),
     ("keys.dialog_edit_submit", "Enregistrer"),
     ("keys.dialog_editing", "Enregistrement…"),
+    ("tutorial.open", "Beginner tutorial"),
+    ("tutorial.close", "Close tutorial"),
+    ("tutorial.skip", "Skip"),
+    ("tutorial.previous", "Previous"),
+    ("tutorial.next", "Next"),
+    ("tutorial.finish", "Finish"),
+    ("tutorial.step_count", "Step {current} of {total}"),
+    ("tutorial.demo_ready", "Ready"),
+    ("tutorial.signin.title", "Sign in"),
+    (
+        "tutorial.signin.body",
+        "Start from the GitHub sign-in entry. This tutorial only demonstrates the flow and does not submit a token.",
+    ),
+    ("tutorial.sync.title", "Sync repositories"),
+    (
+        "tutorial.sync.body",
+        "After sign-in, sync the GitHub repository list so deploy-key actions have repositories to work with.",
+    ),
+    ("tutorial.connect.title", "Connect an environment"),
+    (
+        "tutorial.connect.body",
+        "Choose the local machine or a server connection. Keys, clone tasks, and remote checks use the active connection.",
+    ),
+    ("tutorial.create_key.title", "Create a key"),
+    (
+        "tutorial.create_key.body",
+        "Create an SSH key on the active connection. The key can later be attached to a repository as a deploy key.",
+    ),
+    ("tutorial.bind_key.title", "Bind the key"),
+    (
+        "tutorial.bind_key.body",
+        "Return to the repository list and bind the SSH key to the target repository with pull or push authorization.",
+    ),
+    ("tutorial.clone_repo.title", "Clone repository"),
+    (
+        "tutorial.clone_repo.body",
+        "Clone the repository to the active environment after the deploy key is ready.",
+    ),
+    ("tutorial.connect_repo.title", "Connect repository"),
+    (
+        "tutorial.connect_repo.body",
+        "Connect the cloned repository so DeployKeys can manage it through the selected environment.",
+    ),
+    ("tutorial.test_repo.title", "Test repository"),
+    (
+        "tutorial.test_repo.body",
+        "Finish by testing the repository connection. This confirms the path, key, and remote access are aligned.",
+    ),
 ];
 
 const DE: &[(&str, &str)] = &[
@@ -3831,6 +4167,54 @@ const DE: &[(&str, &str)] = &[
     ("keys.dialog_title_edit", "SSH-Schlüssel bearbeiten"),
     ("keys.dialog_edit_submit", "Speichern"),
     ("keys.dialog_editing", "Speichern…"),
+    ("tutorial.open", "Beginner tutorial"),
+    ("tutorial.close", "Close tutorial"),
+    ("tutorial.skip", "Skip"),
+    ("tutorial.previous", "Previous"),
+    ("tutorial.next", "Next"),
+    ("tutorial.finish", "Finish"),
+    ("tutorial.step_count", "Step {current} of {total}"),
+    ("tutorial.demo_ready", "Ready"),
+    ("tutorial.signin.title", "Sign in"),
+    (
+        "tutorial.signin.body",
+        "Start from the GitHub sign-in entry. This tutorial only demonstrates the flow and does not submit a token.",
+    ),
+    ("tutorial.sync.title", "Sync repositories"),
+    (
+        "tutorial.sync.body",
+        "After sign-in, sync the GitHub repository list so deploy-key actions have repositories to work with.",
+    ),
+    ("tutorial.connect.title", "Connect an environment"),
+    (
+        "tutorial.connect.body",
+        "Choose the local machine or a server connection. Keys, clone tasks, and remote checks use the active connection.",
+    ),
+    ("tutorial.create_key.title", "Create a key"),
+    (
+        "tutorial.create_key.body",
+        "Create an SSH key on the active connection. The key can later be attached to a repository as a deploy key.",
+    ),
+    ("tutorial.bind_key.title", "Bind the key"),
+    (
+        "tutorial.bind_key.body",
+        "Return to the repository list and bind the SSH key to the target repository with pull or push authorization.",
+    ),
+    ("tutorial.clone_repo.title", "Clone repository"),
+    (
+        "tutorial.clone_repo.body",
+        "Clone the repository to the active environment after the deploy key is ready.",
+    ),
+    ("tutorial.connect_repo.title", "Connect repository"),
+    (
+        "tutorial.connect_repo.body",
+        "Connect the cloned repository so DeployKeys can manage it through the selected environment.",
+    ),
+    ("tutorial.test_repo.title", "Test repository"),
+    (
+        "tutorial.test_repo.body",
+        "Finish by testing the repository connection. This confirms the path, key, and remote access are aligned.",
+    ),
 ];
 
 const IT: &[(&str, &str)] = &[
@@ -4107,6 +4491,54 @@ const IT: &[(&str, &str)] = &[
     ("keys.dialog_title_edit", "Modifica chiave SSH"),
     ("keys.dialog_edit_submit", "Salva"),
     ("keys.dialog_editing", "Salvataggio…"),
+    ("tutorial.open", "Beginner tutorial"),
+    ("tutorial.close", "Close tutorial"),
+    ("tutorial.skip", "Skip"),
+    ("tutorial.previous", "Previous"),
+    ("tutorial.next", "Next"),
+    ("tutorial.finish", "Finish"),
+    ("tutorial.step_count", "Step {current} of {total}"),
+    ("tutorial.demo_ready", "Ready"),
+    ("tutorial.signin.title", "Sign in"),
+    (
+        "tutorial.signin.body",
+        "Start from the GitHub sign-in entry. This tutorial only demonstrates the flow and does not submit a token.",
+    ),
+    ("tutorial.sync.title", "Sync repositories"),
+    (
+        "tutorial.sync.body",
+        "After sign-in, sync the GitHub repository list so deploy-key actions have repositories to work with.",
+    ),
+    ("tutorial.connect.title", "Connect an environment"),
+    (
+        "tutorial.connect.body",
+        "Choose the local machine or a server connection. Keys, clone tasks, and remote checks use the active connection.",
+    ),
+    ("tutorial.create_key.title", "Create a key"),
+    (
+        "tutorial.create_key.body",
+        "Create an SSH key on the active connection. The key can later be attached to a repository as a deploy key.",
+    ),
+    ("tutorial.bind_key.title", "Bind the key"),
+    (
+        "tutorial.bind_key.body",
+        "Return to the repository list and bind the SSH key to the target repository with pull or push authorization.",
+    ),
+    ("tutorial.clone_repo.title", "Clone repository"),
+    (
+        "tutorial.clone_repo.body",
+        "Clone the repository to the active environment after the deploy key is ready.",
+    ),
+    ("tutorial.connect_repo.title", "Connect repository"),
+    (
+        "tutorial.connect_repo.body",
+        "Connect the cloned repository so DeployKeys can manage it through the selected environment.",
+    ),
+    ("tutorial.test_repo.title", "Test repository"),
+    (
+        "tutorial.test_repo.body",
+        "Finish by testing the repository connection. This confirms the path, key, and remote access are aligned.",
+    ),
 ];
 
 const RU: &[(&str, &str)] = &[
@@ -4383,6 +4815,54 @@ const RU: &[(&str, &str)] = &[
     ("keys.dialog_title_edit", "Изменить SSH-ключ"),
     ("keys.dialog_edit_submit", "Сохранить"),
     ("keys.dialog_editing", "Сохранение…"),
+    ("tutorial.open", "Beginner tutorial"),
+    ("tutorial.close", "Close tutorial"),
+    ("tutorial.skip", "Skip"),
+    ("tutorial.previous", "Previous"),
+    ("tutorial.next", "Next"),
+    ("tutorial.finish", "Finish"),
+    ("tutorial.step_count", "Step {current} of {total}"),
+    ("tutorial.demo_ready", "Ready"),
+    ("tutorial.signin.title", "Sign in"),
+    (
+        "tutorial.signin.body",
+        "Start from the GitHub sign-in entry. This tutorial only demonstrates the flow and does not submit a token.",
+    ),
+    ("tutorial.sync.title", "Sync repositories"),
+    (
+        "tutorial.sync.body",
+        "After sign-in, sync the GitHub repository list so deploy-key actions have repositories to work with.",
+    ),
+    ("tutorial.connect.title", "Connect an environment"),
+    (
+        "tutorial.connect.body",
+        "Choose the local machine or a server connection. Keys, clone tasks, and remote checks use the active connection.",
+    ),
+    ("tutorial.create_key.title", "Create a key"),
+    (
+        "tutorial.create_key.body",
+        "Create an SSH key on the active connection. The key can later be attached to a repository as a deploy key.",
+    ),
+    ("tutorial.bind_key.title", "Bind the key"),
+    (
+        "tutorial.bind_key.body",
+        "Return to the repository list and bind the SSH key to the target repository with pull or push authorization.",
+    ),
+    ("tutorial.clone_repo.title", "Clone repository"),
+    (
+        "tutorial.clone_repo.body",
+        "Clone the repository to the active environment after the deploy key is ready.",
+    ),
+    ("tutorial.connect_repo.title", "Connect repository"),
+    (
+        "tutorial.connect_repo.body",
+        "Connect the cloned repository so DeployKeys can manage it through the selected environment.",
+    ),
+    ("tutorial.test_repo.title", "Test repository"),
+    (
+        "tutorial.test_repo.body",
+        "Finish by testing the repository connection. This confirms the path, key, and remote access are aligned.",
+    ),
 ];
 
 const TH: &[(&str, &str)] = &[
@@ -4722,6 +5202,54 @@ const TH: &[(&str, &str)] = &[
     ("keys.dialog_title_edit", "แก้ไขคีย์ SSH"),
     ("keys.dialog_edit_submit", "บันทึก"),
     ("keys.dialog_editing", "กำลังบันทึก…"),
+    ("tutorial.open", "Beginner tutorial"),
+    ("tutorial.close", "Close tutorial"),
+    ("tutorial.skip", "Skip"),
+    ("tutorial.previous", "Previous"),
+    ("tutorial.next", "Next"),
+    ("tutorial.finish", "Finish"),
+    ("tutorial.step_count", "Step {current} of {total}"),
+    ("tutorial.demo_ready", "Ready"),
+    ("tutorial.signin.title", "Sign in"),
+    (
+        "tutorial.signin.body",
+        "Start from the GitHub sign-in entry. This tutorial only demonstrates the flow and does not submit a token.",
+    ),
+    ("tutorial.sync.title", "Sync repositories"),
+    (
+        "tutorial.sync.body",
+        "After sign-in, sync the GitHub repository list so deploy-key actions have repositories to work with.",
+    ),
+    ("tutorial.connect.title", "Connect an environment"),
+    (
+        "tutorial.connect.body",
+        "Choose the local machine or a server connection. Keys, clone tasks, and remote checks use the active connection.",
+    ),
+    ("tutorial.create_key.title", "Create a key"),
+    (
+        "tutorial.create_key.body",
+        "Create an SSH key on the active connection. The key can later be attached to a repository as a deploy key.",
+    ),
+    ("tutorial.bind_key.title", "Bind the key"),
+    (
+        "tutorial.bind_key.body",
+        "Return to the repository list and bind the SSH key to the target repository with pull or push authorization.",
+    ),
+    ("tutorial.clone_repo.title", "Clone repository"),
+    (
+        "tutorial.clone_repo.body",
+        "Clone the repository to the active environment after the deploy key is ready.",
+    ),
+    ("tutorial.connect_repo.title", "Connect repository"),
+    (
+        "tutorial.connect_repo.body",
+        "Connect the cloned repository so DeployKeys can manage it through the selected environment.",
+    ),
+    ("tutorial.test_repo.title", "Test repository"),
+    (
+        "tutorial.test_repo.body",
+        "Finish by testing the repository connection. This confirms the path, key, and remote access are aligned.",
+    ),
 ];
 
 const VI: &[(&str, &str)] = &[
@@ -4998,6 +5526,54 @@ const VI: &[(&str, &str)] = &[
     ("keys.dialog_title_edit", "Sửa khóa SSH"),
     ("keys.dialog_edit_submit", "Lưu"),
     ("keys.dialog_editing", "Đang lưu…"),
+    ("tutorial.open", "Beginner tutorial"),
+    ("tutorial.close", "Close tutorial"),
+    ("tutorial.skip", "Skip"),
+    ("tutorial.previous", "Previous"),
+    ("tutorial.next", "Next"),
+    ("tutorial.finish", "Finish"),
+    ("tutorial.step_count", "Step {current} of {total}"),
+    ("tutorial.demo_ready", "Ready"),
+    ("tutorial.signin.title", "Sign in"),
+    (
+        "tutorial.signin.body",
+        "Start from the GitHub sign-in entry. This tutorial only demonstrates the flow and does not submit a token.",
+    ),
+    ("tutorial.sync.title", "Sync repositories"),
+    (
+        "tutorial.sync.body",
+        "After sign-in, sync the GitHub repository list so deploy-key actions have repositories to work with.",
+    ),
+    ("tutorial.connect.title", "Connect an environment"),
+    (
+        "tutorial.connect.body",
+        "Choose the local machine or a server connection. Keys, clone tasks, and remote checks use the active connection.",
+    ),
+    ("tutorial.create_key.title", "Create a key"),
+    (
+        "tutorial.create_key.body",
+        "Create an SSH key on the active connection. The key can later be attached to a repository as a deploy key.",
+    ),
+    ("tutorial.bind_key.title", "Bind the key"),
+    (
+        "tutorial.bind_key.body",
+        "Return to the repository list and bind the SSH key to the target repository with pull or push authorization.",
+    ),
+    ("tutorial.clone_repo.title", "Clone repository"),
+    (
+        "tutorial.clone_repo.body",
+        "Clone the repository to the active environment after the deploy key is ready.",
+    ),
+    ("tutorial.connect_repo.title", "Connect repository"),
+    (
+        "tutorial.connect_repo.body",
+        "Connect the cloned repository so DeployKeys can manage it through the selected environment.",
+    ),
+    ("tutorial.test_repo.title", "Test repository"),
+    (
+        "tutorial.test_repo.body",
+        "Finish by testing the repository connection. This confirms the path, key, and remote access are aligned.",
+    ),
 ];
 
 const TR: &[(&str, &str)] = &[
@@ -5274,6 +5850,54 @@ const TR: &[(&str, &str)] = &[
     ("keys.dialog_title_edit", "SSH Anahtarını Düzenle"),
     ("keys.dialog_edit_submit", "Kaydet"),
     ("keys.dialog_editing", "Kaydediliyor…"),
+    ("tutorial.open", "Beginner tutorial"),
+    ("tutorial.close", "Close tutorial"),
+    ("tutorial.skip", "Skip"),
+    ("tutorial.previous", "Previous"),
+    ("tutorial.next", "Next"),
+    ("tutorial.finish", "Finish"),
+    ("tutorial.step_count", "Step {current} of {total}"),
+    ("tutorial.demo_ready", "Ready"),
+    ("tutorial.signin.title", "Sign in"),
+    (
+        "tutorial.signin.body",
+        "Start from the GitHub sign-in entry. This tutorial only demonstrates the flow and does not submit a token.",
+    ),
+    ("tutorial.sync.title", "Sync repositories"),
+    (
+        "tutorial.sync.body",
+        "After sign-in, sync the GitHub repository list so deploy-key actions have repositories to work with.",
+    ),
+    ("tutorial.connect.title", "Connect an environment"),
+    (
+        "tutorial.connect.body",
+        "Choose the local machine or a server connection. Keys, clone tasks, and remote checks use the active connection.",
+    ),
+    ("tutorial.create_key.title", "Create a key"),
+    (
+        "tutorial.create_key.body",
+        "Create an SSH key on the active connection. The key can later be attached to a repository as a deploy key.",
+    ),
+    ("tutorial.bind_key.title", "Bind the key"),
+    (
+        "tutorial.bind_key.body",
+        "Return to the repository list and bind the SSH key to the target repository with pull or push authorization.",
+    ),
+    ("tutorial.clone_repo.title", "Clone repository"),
+    (
+        "tutorial.clone_repo.body",
+        "Clone the repository to the active environment after the deploy key is ready.",
+    ),
+    ("tutorial.connect_repo.title", "Connect repository"),
+    (
+        "tutorial.connect_repo.body",
+        "Connect the cloned repository so DeployKeys can manage it through the selected environment.",
+    ),
+    ("tutorial.test_repo.title", "Test repository"),
+    (
+        "tutorial.test_repo.body",
+        "Finish by testing the repository connection. This confirms the path, key, and remote access are aligned.",
+    ),
 ];
 
 const PL: &[(&str, &str)] = &[
@@ -5550,6 +6174,54 @@ const PL: &[(&str, &str)] = &[
     ("keys.dialog_title_edit", "Edytuj klucz SSH"),
     ("keys.dialog_edit_submit", "Zapisz"),
     ("keys.dialog_editing", "Zapisywanie…"),
+    ("tutorial.open", "Beginner tutorial"),
+    ("tutorial.close", "Close tutorial"),
+    ("tutorial.skip", "Skip"),
+    ("tutorial.previous", "Previous"),
+    ("tutorial.next", "Next"),
+    ("tutorial.finish", "Finish"),
+    ("tutorial.step_count", "Step {current} of {total}"),
+    ("tutorial.demo_ready", "Ready"),
+    ("tutorial.signin.title", "Sign in"),
+    (
+        "tutorial.signin.body",
+        "Start from the GitHub sign-in entry. This tutorial only demonstrates the flow and does not submit a token.",
+    ),
+    ("tutorial.sync.title", "Sync repositories"),
+    (
+        "tutorial.sync.body",
+        "After sign-in, sync the GitHub repository list so deploy-key actions have repositories to work with.",
+    ),
+    ("tutorial.connect.title", "Connect an environment"),
+    (
+        "tutorial.connect.body",
+        "Choose the local machine or a server connection. Keys, clone tasks, and remote checks use the active connection.",
+    ),
+    ("tutorial.create_key.title", "Create a key"),
+    (
+        "tutorial.create_key.body",
+        "Create an SSH key on the active connection. The key can later be attached to a repository as a deploy key.",
+    ),
+    ("tutorial.bind_key.title", "Bind the key"),
+    (
+        "tutorial.bind_key.body",
+        "Return to the repository list and bind the SSH key to the target repository with pull or push authorization.",
+    ),
+    ("tutorial.clone_repo.title", "Clone repository"),
+    (
+        "tutorial.clone_repo.body",
+        "Clone the repository to the active environment after the deploy key is ready.",
+    ),
+    ("tutorial.connect_repo.title", "Connect repository"),
+    (
+        "tutorial.connect_repo.body",
+        "Connect the cloned repository so DeployKeys can manage it through the selected environment.",
+    ),
+    ("tutorial.test_repo.title", "Test repository"),
+    (
+        "tutorial.test_repo.body",
+        "Finish by testing the repository connection. This confirms the path, key, and remote access are aligned.",
+    ),
 ];
 
 const NL: &[(&str, &str)] = &[
@@ -5826,6 +6498,54 @@ const NL: &[(&str, &str)] = &[
     ("keys.dialog_title_edit", "SSH-sleutel bewerken"),
     ("keys.dialog_edit_submit", "Opslaan"),
     ("keys.dialog_editing", "Opslaan…"),
+    ("tutorial.open", "Beginner tutorial"),
+    ("tutorial.close", "Close tutorial"),
+    ("tutorial.skip", "Skip"),
+    ("tutorial.previous", "Previous"),
+    ("tutorial.next", "Next"),
+    ("tutorial.finish", "Finish"),
+    ("tutorial.step_count", "Step {current} of {total}"),
+    ("tutorial.demo_ready", "Ready"),
+    ("tutorial.signin.title", "Sign in"),
+    (
+        "tutorial.signin.body",
+        "Start from the GitHub sign-in entry. This tutorial only demonstrates the flow and does not submit a token.",
+    ),
+    ("tutorial.sync.title", "Sync repositories"),
+    (
+        "tutorial.sync.body",
+        "After sign-in, sync the GitHub repository list so deploy-key actions have repositories to work with.",
+    ),
+    ("tutorial.connect.title", "Connect an environment"),
+    (
+        "tutorial.connect.body",
+        "Choose the local machine or a server connection. Keys, clone tasks, and remote checks use the active connection.",
+    ),
+    ("tutorial.create_key.title", "Create a key"),
+    (
+        "tutorial.create_key.body",
+        "Create an SSH key on the active connection. The key can later be attached to a repository as a deploy key.",
+    ),
+    ("tutorial.bind_key.title", "Bind the key"),
+    (
+        "tutorial.bind_key.body",
+        "Return to the repository list and bind the SSH key to the target repository with pull or push authorization.",
+    ),
+    ("tutorial.clone_repo.title", "Clone repository"),
+    (
+        "tutorial.clone_repo.body",
+        "Clone the repository to the active environment after the deploy key is ready.",
+    ),
+    ("tutorial.connect_repo.title", "Connect repository"),
+    (
+        "tutorial.connect_repo.body",
+        "Connect the cloned repository so DeployKeys can manage it through the selected environment.",
+    ),
+    ("tutorial.test_repo.title", "Test repository"),
+    (
+        "tutorial.test_repo.body",
+        "Finish by testing the repository connection. This confirms the path, key, and remote access are aligned.",
+    ),
 ];
 
 const SV: &[(&str, &str)] = &[
@@ -6102,6 +6822,54 @@ const SV: &[(&str, &str)] = &[
     ("keys.dialog_title_edit", "Redigera SSH-nyckel"),
     ("keys.dialog_edit_submit", "Spara"),
     ("keys.dialog_editing", "Sparar…"),
+    ("tutorial.open", "Beginner tutorial"),
+    ("tutorial.close", "Close tutorial"),
+    ("tutorial.skip", "Skip"),
+    ("tutorial.previous", "Previous"),
+    ("tutorial.next", "Next"),
+    ("tutorial.finish", "Finish"),
+    ("tutorial.step_count", "Step {current} of {total}"),
+    ("tutorial.demo_ready", "Ready"),
+    ("tutorial.signin.title", "Sign in"),
+    (
+        "tutorial.signin.body",
+        "Start from the GitHub sign-in entry. This tutorial only demonstrates the flow and does not submit a token.",
+    ),
+    ("tutorial.sync.title", "Sync repositories"),
+    (
+        "tutorial.sync.body",
+        "After sign-in, sync the GitHub repository list so deploy-key actions have repositories to work with.",
+    ),
+    ("tutorial.connect.title", "Connect an environment"),
+    (
+        "tutorial.connect.body",
+        "Choose the local machine or a server connection. Keys, clone tasks, and remote checks use the active connection.",
+    ),
+    ("tutorial.create_key.title", "Create a key"),
+    (
+        "tutorial.create_key.body",
+        "Create an SSH key on the active connection. The key can later be attached to a repository as a deploy key.",
+    ),
+    ("tutorial.bind_key.title", "Bind the key"),
+    (
+        "tutorial.bind_key.body",
+        "Return to the repository list and bind the SSH key to the target repository with pull or push authorization.",
+    ),
+    ("tutorial.clone_repo.title", "Clone repository"),
+    (
+        "tutorial.clone_repo.body",
+        "Clone the repository to the active environment after the deploy key is ready.",
+    ),
+    ("tutorial.connect_repo.title", "Connect repository"),
+    (
+        "tutorial.connect_repo.body",
+        "Connect the cloned repository so DeployKeys can manage it through the selected environment.",
+    ),
+    ("tutorial.test_repo.title", "Test repository"),
+    (
+        "tutorial.test_repo.body",
+        "Finish by testing the repository connection. This confirms the path, key, and remote access are aligned.",
+    ),
 ];
 
 const DA: &[(&str, &str)] = &[
@@ -6378,6 +7146,54 @@ const DA: &[(&str, &str)] = &[
     ("keys.dialog_title_edit", "Rediger SSH-nøgle"),
     ("keys.dialog_edit_submit", "Gem"),
     ("keys.dialog_editing", "Gemmer…"),
+    ("tutorial.open", "Beginner tutorial"),
+    ("tutorial.close", "Close tutorial"),
+    ("tutorial.skip", "Skip"),
+    ("tutorial.previous", "Previous"),
+    ("tutorial.next", "Next"),
+    ("tutorial.finish", "Finish"),
+    ("tutorial.step_count", "Step {current} of {total}"),
+    ("tutorial.demo_ready", "Ready"),
+    ("tutorial.signin.title", "Sign in"),
+    (
+        "tutorial.signin.body",
+        "Start from the GitHub sign-in entry. This tutorial only demonstrates the flow and does not submit a token.",
+    ),
+    ("tutorial.sync.title", "Sync repositories"),
+    (
+        "tutorial.sync.body",
+        "After sign-in, sync the GitHub repository list so deploy-key actions have repositories to work with.",
+    ),
+    ("tutorial.connect.title", "Connect an environment"),
+    (
+        "tutorial.connect.body",
+        "Choose the local machine or a server connection. Keys, clone tasks, and remote checks use the active connection.",
+    ),
+    ("tutorial.create_key.title", "Create a key"),
+    (
+        "tutorial.create_key.body",
+        "Create an SSH key on the active connection. The key can later be attached to a repository as a deploy key.",
+    ),
+    ("tutorial.bind_key.title", "Bind the key"),
+    (
+        "tutorial.bind_key.body",
+        "Return to the repository list and bind the SSH key to the target repository with pull or push authorization.",
+    ),
+    ("tutorial.clone_repo.title", "Clone repository"),
+    (
+        "tutorial.clone_repo.body",
+        "Clone the repository to the active environment after the deploy key is ready.",
+    ),
+    ("tutorial.connect_repo.title", "Connect repository"),
+    (
+        "tutorial.connect_repo.body",
+        "Connect the cloned repository so DeployKeys can manage it through the selected environment.",
+    ),
+    ("tutorial.test_repo.title", "Test repository"),
+    (
+        "tutorial.test_repo.body",
+        "Finish by testing the repository connection. This confirms the path, key, and remote access are aligned.",
+    ),
 ];
 
 const NB: &[(&str, &str)] = &[
@@ -6654,6 +7470,54 @@ const NB: &[(&str, &str)] = &[
     ("keys.dialog_title_edit", "Rediger SSH-nøkkel"),
     ("keys.dialog_edit_submit", "Lagre"),
     ("keys.dialog_editing", "Lagrer…"),
+    ("tutorial.open", "Beginner tutorial"),
+    ("tutorial.close", "Close tutorial"),
+    ("tutorial.skip", "Skip"),
+    ("tutorial.previous", "Previous"),
+    ("tutorial.next", "Next"),
+    ("tutorial.finish", "Finish"),
+    ("tutorial.step_count", "Step {current} of {total}"),
+    ("tutorial.demo_ready", "Ready"),
+    ("tutorial.signin.title", "Sign in"),
+    (
+        "tutorial.signin.body",
+        "Start from the GitHub sign-in entry. This tutorial only demonstrates the flow and does not submit a token.",
+    ),
+    ("tutorial.sync.title", "Sync repositories"),
+    (
+        "tutorial.sync.body",
+        "After sign-in, sync the GitHub repository list so deploy-key actions have repositories to work with.",
+    ),
+    ("tutorial.connect.title", "Connect an environment"),
+    (
+        "tutorial.connect.body",
+        "Choose the local machine or a server connection. Keys, clone tasks, and remote checks use the active connection.",
+    ),
+    ("tutorial.create_key.title", "Create a key"),
+    (
+        "tutorial.create_key.body",
+        "Create an SSH key on the active connection. The key can later be attached to a repository as a deploy key.",
+    ),
+    ("tutorial.bind_key.title", "Bind the key"),
+    (
+        "tutorial.bind_key.body",
+        "Return to the repository list and bind the SSH key to the target repository with pull or push authorization.",
+    ),
+    ("tutorial.clone_repo.title", "Clone repository"),
+    (
+        "tutorial.clone_repo.body",
+        "Clone the repository to the active environment after the deploy key is ready.",
+    ),
+    ("tutorial.connect_repo.title", "Connect repository"),
+    (
+        "tutorial.connect_repo.body",
+        "Connect the cloned repository so DeployKeys can manage it through the selected environment.",
+    ),
+    ("tutorial.test_repo.title", "Test repository"),
+    (
+        "tutorial.test_repo.body",
+        "Finish by testing the repository connection. This confirms the path, key, and remote access are aligned.",
+    ),
 ];
 
 const FI: &[(&str, &str)] = &[
@@ -6930,6 +7794,54 @@ const FI: &[(&str, &str)] = &[
     ("keys.dialog_title_edit", "Muokkaa SSH-avainta"),
     ("keys.dialog_edit_submit", "Tallenna"),
     ("keys.dialog_editing", "Tallennetaan…"),
+    ("tutorial.open", "Beginner tutorial"),
+    ("tutorial.close", "Close tutorial"),
+    ("tutorial.skip", "Skip"),
+    ("tutorial.previous", "Previous"),
+    ("tutorial.next", "Next"),
+    ("tutorial.finish", "Finish"),
+    ("tutorial.step_count", "Step {current} of {total}"),
+    ("tutorial.demo_ready", "Ready"),
+    ("tutorial.signin.title", "Sign in"),
+    (
+        "tutorial.signin.body",
+        "Start from the GitHub sign-in entry. This tutorial only demonstrates the flow and does not submit a token.",
+    ),
+    ("tutorial.sync.title", "Sync repositories"),
+    (
+        "tutorial.sync.body",
+        "After sign-in, sync the GitHub repository list so deploy-key actions have repositories to work with.",
+    ),
+    ("tutorial.connect.title", "Connect an environment"),
+    (
+        "tutorial.connect.body",
+        "Choose the local machine or a server connection. Keys, clone tasks, and remote checks use the active connection.",
+    ),
+    ("tutorial.create_key.title", "Create a key"),
+    (
+        "tutorial.create_key.body",
+        "Create an SSH key on the active connection. The key can later be attached to a repository as a deploy key.",
+    ),
+    ("tutorial.bind_key.title", "Bind the key"),
+    (
+        "tutorial.bind_key.body",
+        "Return to the repository list and bind the SSH key to the target repository with pull or push authorization.",
+    ),
+    ("tutorial.clone_repo.title", "Clone repository"),
+    (
+        "tutorial.clone_repo.body",
+        "Clone the repository to the active environment after the deploy key is ready.",
+    ),
+    ("tutorial.connect_repo.title", "Connect repository"),
+    (
+        "tutorial.connect_repo.body",
+        "Connect the cloned repository so DeployKeys can manage it through the selected environment.",
+    ),
+    ("tutorial.test_repo.title", "Test repository"),
+    (
+        "tutorial.test_repo.body",
+        "Finish by testing the repository connection. This confirms the path, key, and remote access are aligned.",
+    ),
 ];
 
 const CS: &[(&str, &str)] = &[
@@ -7206,6 +8118,54 @@ const CS: &[(&str, &str)] = &[
     ("keys.dialog_title_edit", "Upravit SSH klíč"),
     ("keys.dialog_edit_submit", "Uložit"),
     ("keys.dialog_editing", "Ukládání…"),
+    ("tutorial.open", "Beginner tutorial"),
+    ("tutorial.close", "Close tutorial"),
+    ("tutorial.skip", "Skip"),
+    ("tutorial.previous", "Previous"),
+    ("tutorial.next", "Next"),
+    ("tutorial.finish", "Finish"),
+    ("tutorial.step_count", "Step {current} of {total}"),
+    ("tutorial.demo_ready", "Ready"),
+    ("tutorial.signin.title", "Sign in"),
+    (
+        "tutorial.signin.body",
+        "Start from the GitHub sign-in entry. This tutorial only demonstrates the flow and does not submit a token.",
+    ),
+    ("tutorial.sync.title", "Sync repositories"),
+    (
+        "tutorial.sync.body",
+        "After sign-in, sync the GitHub repository list so deploy-key actions have repositories to work with.",
+    ),
+    ("tutorial.connect.title", "Connect an environment"),
+    (
+        "tutorial.connect.body",
+        "Choose the local machine or a server connection. Keys, clone tasks, and remote checks use the active connection.",
+    ),
+    ("tutorial.create_key.title", "Create a key"),
+    (
+        "tutorial.create_key.body",
+        "Create an SSH key on the active connection. The key can later be attached to a repository as a deploy key.",
+    ),
+    ("tutorial.bind_key.title", "Bind the key"),
+    (
+        "tutorial.bind_key.body",
+        "Return to the repository list and bind the SSH key to the target repository with pull or push authorization.",
+    ),
+    ("tutorial.clone_repo.title", "Clone repository"),
+    (
+        "tutorial.clone_repo.body",
+        "Clone the repository to the active environment after the deploy key is ready.",
+    ),
+    ("tutorial.connect_repo.title", "Connect repository"),
+    (
+        "tutorial.connect_repo.body",
+        "Connect the cloned repository so DeployKeys can manage it through the selected environment.",
+    ),
+    ("tutorial.test_repo.title", "Test repository"),
+    (
+        "tutorial.test_repo.body",
+        "Finish by testing the repository connection. This confirms the path, key, and remote access are aligned.",
+    ),
 ];
 
 const SK: &[(&str, &str)] = &[
@@ -7482,6 +8442,54 @@ const SK: &[(&str, &str)] = &[
     ("keys.dialog_title_edit", "Upraviť SSH kľúč"),
     ("keys.dialog_edit_submit", "Uložiť"),
     ("keys.dialog_editing", "Ukladanie…"),
+    ("tutorial.open", "Beginner tutorial"),
+    ("tutorial.close", "Close tutorial"),
+    ("tutorial.skip", "Skip"),
+    ("tutorial.previous", "Previous"),
+    ("tutorial.next", "Next"),
+    ("tutorial.finish", "Finish"),
+    ("tutorial.step_count", "Step {current} of {total}"),
+    ("tutorial.demo_ready", "Ready"),
+    ("tutorial.signin.title", "Sign in"),
+    (
+        "tutorial.signin.body",
+        "Start from the GitHub sign-in entry. This tutorial only demonstrates the flow and does not submit a token.",
+    ),
+    ("tutorial.sync.title", "Sync repositories"),
+    (
+        "tutorial.sync.body",
+        "After sign-in, sync the GitHub repository list so deploy-key actions have repositories to work with.",
+    ),
+    ("tutorial.connect.title", "Connect an environment"),
+    (
+        "tutorial.connect.body",
+        "Choose the local machine or a server connection. Keys, clone tasks, and remote checks use the active connection.",
+    ),
+    ("tutorial.create_key.title", "Create a key"),
+    (
+        "tutorial.create_key.body",
+        "Create an SSH key on the active connection. The key can later be attached to a repository as a deploy key.",
+    ),
+    ("tutorial.bind_key.title", "Bind the key"),
+    (
+        "tutorial.bind_key.body",
+        "Return to the repository list and bind the SSH key to the target repository with pull or push authorization.",
+    ),
+    ("tutorial.clone_repo.title", "Clone repository"),
+    (
+        "tutorial.clone_repo.body",
+        "Clone the repository to the active environment after the deploy key is ready.",
+    ),
+    ("tutorial.connect_repo.title", "Connect repository"),
+    (
+        "tutorial.connect_repo.body",
+        "Connect the cloned repository so DeployKeys can manage it through the selected environment.",
+    ),
+    ("tutorial.test_repo.title", "Test repository"),
+    (
+        "tutorial.test_repo.body",
+        "Finish by testing the repository connection. This confirms the path, key, and remote access are aligned.",
+    ),
 ];
 
 const RO: &[(&str, &str)] = &[
@@ -7758,6 +8766,54 @@ const RO: &[(&str, &str)] = &[
     ("keys.dialog_title_edit", "Editează cheia SSH"),
     ("keys.dialog_edit_submit", "Salvare"),
     ("keys.dialog_editing", "Se salvează…"),
+    ("tutorial.open", "Beginner tutorial"),
+    ("tutorial.close", "Close tutorial"),
+    ("tutorial.skip", "Skip"),
+    ("tutorial.previous", "Previous"),
+    ("tutorial.next", "Next"),
+    ("tutorial.finish", "Finish"),
+    ("tutorial.step_count", "Step {current} of {total}"),
+    ("tutorial.demo_ready", "Ready"),
+    ("tutorial.signin.title", "Sign in"),
+    (
+        "tutorial.signin.body",
+        "Start from the GitHub sign-in entry. This tutorial only demonstrates the flow and does not submit a token.",
+    ),
+    ("tutorial.sync.title", "Sync repositories"),
+    (
+        "tutorial.sync.body",
+        "After sign-in, sync the GitHub repository list so deploy-key actions have repositories to work with.",
+    ),
+    ("tutorial.connect.title", "Connect an environment"),
+    (
+        "tutorial.connect.body",
+        "Choose the local machine or a server connection. Keys, clone tasks, and remote checks use the active connection.",
+    ),
+    ("tutorial.create_key.title", "Create a key"),
+    (
+        "tutorial.create_key.body",
+        "Create an SSH key on the active connection. The key can later be attached to a repository as a deploy key.",
+    ),
+    ("tutorial.bind_key.title", "Bind the key"),
+    (
+        "tutorial.bind_key.body",
+        "Return to the repository list and bind the SSH key to the target repository with pull or push authorization.",
+    ),
+    ("tutorial.clone_repo.title", "Clone repository"),
+    (
+        "tutorial.clone_repo.body",
+        "Clone the repository to the active environment after the deploy key is ready.",
+    ),
+    ("tutorial.connect_repo.title", "Connect repository"),
+    (
+        "tutorial.connect_repo.body",
+        "Connect the cloned repository so DeployKeys can manage it through the selected environment.",
+    ),
+    ("tutorial.test_repo.title", "Test repository"),
+    (
+        "tutorial.test_repo.body",
+        "Finish by testing the repository connection. This confirms the path, key, and remote access are aligned.",
+    ),
 ];
 
 const UK: &[(&str, &str)] = &[
@@ -8034,6 +9090,54 @@ const UK: &[(&str, &str)] = &[
     ("keys.dialog_title_edit", "Редагувати SSH ключ"),
     ("keys.dialog_edit_submit", "Зберегти"),
     ("keys.dialog_editing", "Збереження…"),
+    ("tutorial.open", "Beginner tutorial"),
+    ("tutorial.close", "Close tutorial"),
+    ("tutorial.skip", "Skip"),
+    ("tutorial.previous", "Previous"),
+    ("tutorial.next", "Next"),
+    ("tutorial.finish", "Finish"),
+    ("tutorial.step_count", "Step {current} of {total}"),
+    ("tutorial.demo_ready", "Ready"),
+    ("tutorial.signin.title", "Sign in"),
+    (
+        "tutorial.signin.body",
+        "Start from the GitHub sign-in entry. This tutorial only demonstrates the flow and does not submit a token.",
+    ),
+    ("tutorial.sync.title", "Sync repositories"),
+    (
+        "tutorial.sync.body",
+        "After sign-in, sync the GitHub repository list so deploy-key actions have repositories to work with.",
+    ),
+    ("tutorial.connect.title", "Connect an environment"),
+    (
+        "tutorial.connect.body",
+        "Choose the local machine or a server connection. Keys, clone tasks, and remote checks use the active connection.",
+    ),
+    ("tutorial.create_key.title", "Create a key"),
+    (
+        "tutorial.create_key.body",
+        "Create an SSH key on the active connection. The key can later be attached to a repository as a deploy key.",
+    ),
+    ("tutorial.bind_key.title", "Bind the key"),
+    (
+        "tutorial.bind_key.body",
+        "Return to the repository list and bind the SSH key to the target repository with pull or push authorization.",
+    ),
+    ("tutorial.clone_repo.title", "Clone repository"),
+    (
+        "tutorial.clone_repo.body",
+        "Clone the repository to the active environment after the deploy key is ready.",
+    ),
+    ("tutorial.connect_repo.title", "Connect repository"),
+    (
+        "tutorial.connect_repo.body",
+        "Connect the cloned repository so DeployKeys can manage it through the selected environment.",
+    ),
+    ("tutorial.test_repo.title", "Test repository"),
+    (
+        "tutorial.test_repo.body",
+        "Finish by testing the repository connection. This confirms the path, key, and remote access are aligned.",
+    ),
 ];
 
 const HU: &[(&str, &str)] = &[
@@ -8310,6 +9414,54 @@ const HU: &[(&str, &str)] = &[
     ("keys.dialog_title_edit", "SSH kulcs szerkesztése"),
     ("keys.dialog_edit_submit", "Mentés"),
     ("keys.dialog_editing", "Mentés…"),
+    ("tutorial.open", "Beginner tutorial"),
+    ("tutorial.close", "Close tutorial"),
+    ("tutorial.skip", "Skip"),
+    ("tutorial.previous", "Previous"),
+    ("tutorial.next", "Next"),
+    ("tutorial.finish", "Finish"),
+    ("tutorial.step_count", "Step {current} of {total}"),
+    ("tutorial.demo_ready", "Ready"),
+    ("tutorial.signin.title", "Sign in"),
+    (
+        "tutorial.signin.body",
+        "Start from the GitHub sign-in entry. This tutorial only demonstrates the flow and does not submit a token.",
+    ),
+    ("tutorial.sync.title", "Sync repositories"),
+    (
+        "tutorial.sync.body",
+        "After sign-in, sync the GitHub repository list so deploy-key actions have repositories to work with.",
+    ),
+    ("tutorial.connect.title", "Connect an environment"),
+    (
+        "tutorial.connect.body",
+        "Choose the local machine or a server connection. Keys, clone tasks, and remote checks use the active connection.",
+    ),
+    ("tutorial.create_key.title", "Create a key"),
+    (
+        "tutorial.create_key.body",
+        "Create an SSH key on the active connection. The key can later be attached to a repository as a deploy key.",
+    ),
+    ("tutorial.bind_key.title", "Bind the key"),
+    (
+        "tutorial.bind_key.body",
+        "Return to the repository list and bind the SSH key to the target repository with pull or push authorization.",
+    ),
+    ("tutorial.clone_repo.title", "Clone repository"),
+    (
+        "tutorial.clone_repo.body",
+        "Clone the repository to the active environment after the deploy key is ready.",
+    ),
+    ("tutorial.connect_repo.title", "Connect repository"),
+    (
+        "tutorial.connect_repo.body",
+        "Connect the cloned repository so DeployKeys can manage it through the selected environment.",
+    ),
+    ("tutorial.test_repo.title", "Test repository"),
+    (
+        "tutorial.test_repo.body",
+        "Finish by testing the repository connection. This confirms the path, key, and remote access are aligned.",
+    ),
 ];
 
 const HI: &[(&str, &str)] = &[
@@ -8586,6 +9738,54 @@ const HI: &[(&str, &str)] = &[
     ("keys.dialog_title_edit", "SSH कुंजी संपादित करें"),
     ("keys.dialog_edit_submit", "सहेजें"),
     ("keys.dialog_editing", "सहेज रहा है…"),
+    ("tutorial.open", "Beginner tutorial"),
+    ("tutorial.close", "Close tutorial"),
+    ("tutorial.skip", "Skip"),
+    ("tutorial.previous", "Previous"),
+    ("tutorial.next", "Next"),
+    ("tutorial.finish", "Finish"),
+    ("tutorial.step_count", "Step {current} of {total}"),
+    ("tutorial.demo_ready", "Ready"),
+    ("tutorial.signin.title", "Sign in"),
+    (
+        "tutorial.signin.body",
+        "Start from the GitHub sign-in entry. This tutorial only demonstrates the flow and does not submit a token.",
+    ),
+    ("tutorial.sync.title", "Sync repositories"),
+    (
+        "tutorial.sync.body",
+        "After sign-in, sync the GitHub repository list so deploy-key actions have repositories to work with.",
+    ),
+    ("tutorial.connect.title", "Connect an environment"),
+    (
+        "tutorial.connect.body",
+        "Choose the local machine or a server connection. Keys, clone tasks, and remote checks use the active connection.",
+    ),
+    ("tutorial.create_key.title", "Create a key"),
+    (
+        "tutorial.create_key.body",
+        "Create an SSH key on the active connection. The key can later be attached to a repository as a deploy key.",
+    ),
+    ("tutorial.bind_key.title", "Bind the key"),
+    (
+        "tutorial.bind_key.body",
+        "Return to the repository list and bind the SSH key to the target repository with pull or push authorization.",
+    ),
+    ("tutorial.clone_repo.title", "Clone repository"),
+    (
+        "tutorial.clone_repo.body",
+        "Clone the repository to the active environment after the deploy key is ready.",
+    ),
+    ("tutorial.connect_repo.title", "Connect repository"),
+    (
+        "tutorial.connect_repo.body",
+        "Connect the cloned repository so DeployKeys can manage it through the selected environment.",
+    ),
+    ("tutorial.test_repo.title", "Test repository"),
+    (
+        "tutorial.test_repo.body",
+        "Finish by testing the repository connection. This confirms the path, key, and remote access are aligned.",
+    ),
 ];
 
 const BN: &[(&str, &str)] = &[
@@ -8862,6 +10062,54 @@ const BN: &[(&str, &str)] = &[
     ("keys.dialog_title_edit", "SSH কী সম্পাদনা"),
     ("keys.dialog_edit_submit", "সংরক্ষণ"),
     ("keys.dialog_editing", "সংরক্ষণ হচ্ছে…"),
+    ("tutorial.open", "Beginner tutorial"),
+    ("tutorial.close", "Close tutorial"),
+    ("tutorial.skip", "Skip"),
+    ("tutorial.previous", "Previous"),
+    ("tutorial.next", "Next"),
+    ("tutorial.finish", "Finish"),
+    ("tutorial.step_count", "Step {current} of {total}"),
+    ("tutorial.demo_ready", "Ready"),
+    ("tutorial.signin.title", "Sign in"),
+    (
+        "tutorial.signin.body",
+        "Start from the GitHub sign-in entry. This tutorial only demonstrates the flow and does not submit a token.",
+    ),
+    ("tutorial.sync.title", "Sync repositories"),
+    (
+        "tutorial.sync.body",
+        "After sign-in, sync the GitHub repository list so deploy-key actions have repositories to work with.",
+    ),
+    ("tutorial.connect.title", "Connect an environment"),
+    (
+        "tutorial.connect.body",
+        "Choose the local machine or a server connection. Keys, clone tasks, and remote checks use the active connection.",
+    ),
+    ("tutorial.create_key.title", "Create a key"),
+    (
+        "tutorial.create_key.body",
+        "Create an SSH key on the active connection. The key can later be attached to a repository as a deploy key.",
+    ),
+    ("tutorial.bind_key.title", "Bind the key"),
+    (
+        "tutorial.bind_key.body",
+        "Return to the repository list and bind the SSH key to the target repository with pull or push authorization.",
+    ),
+    ("tutorial.clone_repo.title", "Clone repository"),
+    (
+        "tutorial.clone_repo.body",
+        "Clone the repository to the active environment after the deploy key is ready.",
+    ),
+    ("tutorial.connect_repo.title", "Connect repository"),
+    (
+        "tutorial.connect_repo.body",
+        "Connect the cloned repository so DeployKeys can manage it through the selected environment.",
+    ),
+    ("tutorial.test_repo.title", "Test repository"),
+    (
+        "tutorial.test_repo.body",
+        "Finish by testing the repository connection. This confirms the path, key, and remote access are aligned.",
+    ),
 ];
 
 const MS: &[(&str, &str)] = &[
@@ -9138,6 +10386,54 @@ const MS: &[(&str, &str)] = &[
     ("keys.dialog_title_edit", "Sunting Kunci SSH"),
     ("keys.dialog_edit_submit", "Simpan"),
     ("keys.dialog_editing", "Menyimpan…"),
+    ("tutorial.open", "Beginner tutorial"),
+    ("tutorial.close", "Close tutorial"),
+    ("tutorial.skip", "Skip"),
+    ("tutorial.previous", "Previous"),
+    ("tutorial.next", "Next"),
+    ("tutorial.finish", "Finish"),
+    ("tutorial.step_count", "Step {current} of {total}"),
+    ("tutorial.demo_ready", "Ready"),
+    ("tutorial.signin.title", "Sign in"),
+    (
+        "tutorial.signin.body",
+        "Start from the GitHub sign-in entry. This tutorial only demonstrates the flow and does not submit a token.",
+    ),
+    ("tutorial.sync.title", "Sync repositories"),
+    (
+        "tutorial.sync.body",
+        "After sign-in, sync the GitHub repository list so deploy-key actions have repositories to work with.",
+    ),
+    ("tutorial.connect.title", "Connect an environment"),
+    (
+        "tutorial.connect.body",
+        "Choose the local machine or a server connection. Keys, clone tasks, and remote checks use the active connection.",
+    ),
+    ("tutorial.create_key.title", "Create a key"),
+    (
+        "tutorial.create_key.body",
+        "Create an SSH key on the active connection. The key can later be attached to a repository as a deploy key.",
+    ),
+    ("tutorial.bind_key.title", "Bind the key"),
+    (
+        "tutorial.bind_key.body",
+        "Return to the repository list and bind the SSH key to the target repository with pull or push authorization.",
+    ),
+    ("tutorial.clone_repo.title", "Clone repository"),
+    (
+        "tutorial.clone_repo.body",
+        "Clone the repository to the active environment after the deploy key is ready.",
+    ),
+    ("tutorial.connect_repo.title", "Connect repository"),
+    (
+        "tutorial.connect_repo.body",
+        "Connect the cloned repository so DeployKeys can manage it through the selected environment.",
+    ),
+    ("tutorial.test_repo.title", "Test repository"),
+    (
+        "tutorial.test_repo.body",
+        "Finish by testing the repository connection. This confirms the path, key, and remote access are aligned.",
+    ),
 ];
 
 const FIL: &[(&str, &str)] = &[
@@ -9414,6 +10710,54 @@ const FIL: &[(&str, &str)] = &[
     ("keys.dialog_title_edit", "I-edit ang SSH Key"),
     ("keys.dialog_edit_submit", "I-save"),
     ("keys.dialog_editing", "Nagsasave…"),
+    ("tutorial.open", "Beginner tutorial"),
+    ("tutorial.close", "Close tutorial"),
+    ("tutorial.skip", "Skip"),
+    ("tutorial.previous", "Previous"),
+    ("tutorial.next", "Next"),
+    ("tutorial.finish", "Finish"),
+    ("tutorial.step_count", "Step {current} of {total}"),
+    ("tutorial.demo_ready", "Ready"),
+    ("tutorial.signin.title", "Sign in"),
+    (
+        "tutorial.signin.body",
+        "Start from the GitHub sign-in entry. This tutorial only demonstrates the flow and does not submit a token.",
+    ),
+    ("tutorial.sync.title", "Sync repositories"),
+    (
+        "tutorial.sync.body",
+        "After sign-in, sync the GitHub repository list so deploy-key actions have repositories to work with.",
+    ),
+    ("tutorial.connect.title", "Connect an environment"),
+    (
+        "tutorial.connect.body",
+        "Choose the local machine or a server connection. Keys, clone tasks, and remote checks use the active connection.",
+    ),
+    ("tutorial.create_key.title", "Create a key"),
+    (
+        "tutorial.create_key.body",
+        "Create an SSH key on the active connection. The key can later be attached to a repository as a deploy key.",
+    ),
+    ("tutorial.bind_key.title", "Bind the key"),
+    (
+        "tutorial.bind_key.body",
+        "Return to the repository list and bind the SSH key to the target repository with pull or push authorization.",
+    ),
+    ("tutorial.clone_repo.title", "Clone repository"),
+    (
+        "tutorial.clone_repo.body",
+        "Clone the repository to the active environment after the deploy key is ready.",
+    ),
+    ("tutorial.connect_repo.title", "Connect repository"),
+    (
+        "tutorial.connect_repo.body",
+        "Connect the cloned repository so DeployKeys can manage it through the selected environment.",
+    ),
+    ("tutorial.test_repo.title", "Test repository"),
+    (
+        "tutorial.test_repo.body",
+        "Finish by testing the repository connection. This confirms the path, key, and remote access are aligned.",
+    ),
 ];
 
 #[cfg(test)]

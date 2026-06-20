@@ -1996,7 +1996,7 @@ fn SettingsPage(
 
                     <div
                         class="mt-8 grid flex-1 min-h-0 gap-4 sm:gap-6"
-                        style:grid-template-columns=move || settings_grid_columns()
+                        style:grid-template-columns=settings_grid_columns
                     >
                         <aside class="min-h-0 overflow-visible border-r border-border pr-3">
                             <nav class="flex flex-col gap-1">
