@@ -206,7 +206,7 @@ cargo test -p deploykeys-ui --bin deploykeys-ui i18n::
 
 ## Community
 
-感谢 [LINUX DO](https://linux.do/) 社区提供交流与分享平台。
+Thanks to the [LINUX DO](https://linux.do/) community for providing a platform for communication and sharing.
 
 ## License
 
