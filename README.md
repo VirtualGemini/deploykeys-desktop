@@ -204,6 +204,10 @@ Validate i18n key parity with:
 cargo test -p deploykeys-ui --bin deploykeys-ui i18n::
 ```
 
+## Community
+
+感谢 [LINUX DO](https://linux.do/) 社区提供交流与分享平台。
+
 ## License
 
 This project is licensed under the MIT License. See [LICENSE](LICENSE) for details.
