@@ -2014,9 +2014,9 @@ fn SettingsPage(
 
                     <div
                         class="mt-8 grid flex-1 min-h-0 gap-4 sm:gap-6"
-                        style:grid-template-columns=settings_grid_columns
+                        style:grid-template-columns="calc(12rem + 25px) minmax(0, 1fr)"
                     >
-                        <aside class="min-h-0 overflow-visible border-r border-border pr-3">
+                        <aside class="min-h-0 overflow-hidden border-r border-border pr-3">
                             <nav class="flex flex-col gap-1">
                                 <SettingsTabButton
                                     tab=SettingsTab::General
@@ -2036,7 +2036,7 @@ fn SettingsPage(
                             </nav>
                         </aside>
 
-                        <div class="min-h-0 min-w-0 overflow-visible">
+                        <div class="min-h-0 min-w-0 overflow-hidden">
                             {move || match active_tab.get() {
                                 SettingsTab::General => view! {
                                     <div class="border-y border-border divide-y divide-border">
@@ -2083,20 +2083,6 @@ fn settings_tab_button_class(active: bool) -> &'static str {
     } else {
         "w-full flex h-10 items-center whitespace-nowrap rounded-lg px-3 text-sm font-medium text-muted hover:bg-surface hover:text-content focus:outline-none"
     }
-}
-
-fn settings_grid_columns() -> String {
-    let longest = [
-        t("settings.general"),
-        t("settings.key_storage"),
-        t("settings.config_file"),
-    ]
-    .into_iter()
-    .map(|label| label.chars().count())
-    .max()
-    .unwrap_or(0);
-    let menu_rem = (3.0 + longest as f64 * 0.58).clamp(6.0, 14.0);
-    format!("minmax(6rem, {menu_rem:.2}rem) minmax(16rem, 1fr)")
 }
 
 #[component]
@@ -2310,6 +2296,7 @@ fn LanguageSettingRow(progress: ProgressHandle) -> impl IntoView {
     let locale = i18n::locale();
     let open = RwSignal::new(false);
     let query = RwSignal::new(String::new());
+    let trigger_ref = NodeRef::<html::Button>::new();
 
     let select = move |next: Locale| {
         apply_locale(next, progress);
@@ -2327,6 +2314,7 @@ fn LanguageSettingRow(progress: ProgressHandle) -> impl IntoView {
             // the old segmented buttons (which only scaled to 2–3 languages).
             <div class="relative w-full sm:w-auto sm:self-end">
                 <button
+                    node_ref=trigger_ref
                     type="button"
                     aria-haspopup="listbox"
                     aria-expanded=move || open.get()
@@ -2341,35 +2329,36 @@ fn LanguageSettingRow(progress: ProgressHandle) -> impl IntoView {
                 </button>
 
                 <Show when=move || open.get()>
-                    <div
-                        class="fixed inset-0 z-40"
-                        on:click=move |_| {
-                            open.set(false);
-                            query.set(String::new());
-                        }
-                    ></div>
+                    <Portal>
+                        <div
+                            class="fixed inset-0 z-40"
+                            on:click=move |_| {
+                                open.set(false);
+                                query.set(String::new());
+                            }
+                        ></div>
 
-                    // Right-aligned dropdown within the settings content area.
-                    // It starts at the trigger-friendly settings width and grows
-                    // when filtered language labels need more room, capped by
-                    // the viewport so narrow screens do not overflow.
-                    <div
-                        class="absolute end-0 mt-2 z-50 max-h-[min(420px,calc(100vh-96px))] flex flex-col p-1 bg-surface border border-border rounded-xl shadow-xl"
-                        style:width=move || language_menu_width(&query.get(), 20.0)
-                    >
-                        <div class="shrink-0 px-1 pb-1">
-                            <input
-                                type="text"
-                                prop:value=move || query.get()
-                                on:input=move |ev| query.set(event_target_value(&ev))
-                                placeholder=move || t("settings.language_search_placeholder")
-                                class="w-full h-8 px-2.5 text-sm bg-bg text-content placeholder:text-muted rounded-md border border-border focus:outline-none focus:border-primary"
-                            />
+                        // Portaled to <body>, so settings page overflow can stay
+                        // hidden for the slide animation while the menu avoids
+                        // being clipped by the settings content column.
+                        <div
+                            class="fixed z-50 max-h-[min(420px,calc(100vh-96px))] flex flex-col p-1 bg-surface border border-border rounded-xl shadow-xl"
+                            style=move || settings_language_menu_style(trigger_ref)
+                        >
+                            <div class="shrink-0 px-1 pb-1">
+                                <input
+                                    type="text"
+                                    prop:value=move || query.get()
+                                    on:input=move |ev| query.set(event_target_value(&ev))
+                                    placeholder=move || t("settings.language_search_placeholder")
+                                    class="w-full h-8 px-2.5 text-sm bg-bg text-content placeholder:text-muted rounded-md border border-border focus:outline-none focus:border-primary"
+                                />
+                            </div>
+                            <div class="min-h-0 flex-1 overflow-y-auto p-0.5">
+                                <LanguagePicker query=query on_select=Callback::new(select) />
+                            </div>
                         </div>
-                        <div class="min-h-0 flex-1 overflow-y-auto p-0.5">
-                            <LanguagePicker query=query on_select=Callback::new(select) />
-                        </div>
-                    </div>
+                    </Portal>
                 </Show>
             </div>
         </div>
@@ -2501,21 +2490,24 @@ fn locale_matches(loc: Locale, query: &str) -> bool {
         .any(|alias| alias.to_ascii_lowercase().contains(&q))
 }
 
-/// Width for the language menus: keep a stable base width, but expand when the
-/// visible language labels or localized placeholder need more horizontal room.
-/// The CSS `min()` cap keeps the menu inside the viewport on small screens.
-fn language_menu_width(query: &str, base_rem: f64) -> String {
-    let longest_label = Locale::ALL
-        .iter()
-        .copied()
-        .filter(|&loc| locale_matches(loc, query))
-        .map(|loc| loc.native_name().chars().count() + loc.code().chars().count())
-        .max()
-        .unwrap_or(0)
-        .max(t("settings.language_search_placeholder").chars().count());
-    let content_rem = 7.5 + (longest_label as f64 * 0.58);
-    let width_rem = base_rem.max(content_rem).min(32.0);
-    format!("min(calc(100vw - 2rem), {width_rem:.2}rem)")
+/// Stable menu width: original base width plus 10px, capped by the viewport.
+fn language_menu_width(base_rem: f64) -> String {
+    format!("min(calc(100vw - 2rem), calc({base_rem:.2}rem + 10px))")
+}
+
+fn settings_language_menu_style(trigger_ref: NodeRef<html::Button>) -> String {
+    let width = language_menu_width(20.0);
+    let Some(trigger) = trigger_ref.get() else {
+        return format!("top: 8.5rem; right: 1rem; width: {width};");
+    };
+    let rect = trigger.get_bounding_client_rect();
+    let viewport_width = web_sys::window()
+        .and_then(|w| w.inner_width().ok())
+        .and_then(|value| value.as_f64())
+        .unwrap_or(1024.0);
+    let top = (rect.bottom() + 8.0).max(16.0);
+    let right = (viewport_width - rect.right()).max(16.0);
+    format!("top: {top:.1}px; right: {right:.1}px; width: {width};")
 }
 
 /// Shared, searchable language list used by all three language entry points
@@ -2614,11 +2606,11 @@ fn LanguageToggle(progress: ProgressHandle) -> impl IntoView {
                     }
                 ></div>
 
-                // Dropdown panel. It keeps the compact base width, expands for
-                // longer language names, and is capped by the viewport.
+                // Dropdown panel. It keeps the compact base width plus 10px,
+                // capped by the viewport.
                 <div
                     class="absolute end-0 mt-2 z-50 max-h-[min(420px,calc(100vh-96px))] flex flex-col p-1 bg-surface border border-border rounded-xl shadow-xl"
-                    style:width=move || language_menu_width(&query.get(), 16.0)
+                    style:width=language_menu_width(16.0)
                 >
                     // Sticky search input at the top of the panel.
                     <div class="shrink-0 px-1 pb-1">
