@@ -194,6 +194,18 @@ struct ConnectionDto {
     key_base_dir: String,
 }
 
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct UpdateRemoteConnectionPayload {
+    id: String,
+    alias: String,
+    host: String,
+    port: u16,
+    username: String,
+    auth_method: String,
+    auth_secret: String,
+}
+
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct SshConfigFileDto {
@@ -538,14 +550,17 @@ async fn create_remote_connection(
 #[tauri::command]
 async fn update_remote_connection(
     state: State<'_, AppState>,
-    id: String,
-    alias: String,
-    host: String,
-    port: u16,
-    username: String,
-    auth_method: String,
-    auth_secret: String,
+    payload: UpdateRemoteConnectionPayload,
 ) -> Result<ConnectionDto, String> {
+    let UpdateRemoteConnectionPayload {
+        id,
+        alias,
+        host,
+        port,
+        username,
+        auth_method,
+        auth_secret,
+    } = payload;
     let Some(target_id) = remote_connection_target_id(&id)? else {
         return Err("The local connection cannot be edited".to_string());
     };

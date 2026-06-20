@@ -152,7 +152,7 @@ pub async fn update_remote_connection(
 ) -> Result<ConnectionDto, String> {
     #[derive(Serialize)]
     #[serde(rename_all = "camelCase")]
-    struct Args {
+    struct Payload {
         id: String,
         alias: String,
         host: String,
@@ -161,16 +161,22 @@ pub async fn update_remote_connection(
         auth_method: String,
         auth_secret: String,
     }
+    #[derive(Serialize)]
+    struct Args {
+        payload: Payload,
+    }
     invoke(
         "update_remote_connection",
         &Args {
-            id,
-            alias,
-            host,
-            port,
-            username,
-            auth_method,
-            auth_secret,
+            payload: Payload {
+                id,
+                alias,
+                host,
+                port,
+                username,
+                auth_method,
+                auth_secret,
+            },
         },
     )
     .await
