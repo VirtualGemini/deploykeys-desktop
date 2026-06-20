@@ -2327,34 +2327,10 @@ fn install_credential_backend(data_dir: &std::path::Path) {
     );
 }
 
-/// Resolve (and create) the application data directory under the OS data dir,
-/// migrating pre-rename `deplock/` state on first launch so existing installs
-/// keep their database and settings.
+/// Resolve (and create) the application data directory under the OS data dir.
 async fn resolve_data_dir() -> Result<std::path::PathBuf, Box<dyn std::error::Error>> {
     let base = dirs::data_dir().ok_or("Could not determine the user data directory")?;
     let data_dir = base.join("deploykeys");
-
-    // Pre-rename installs kept state under `deplock/`. Move the whole directory
-    // over on first launch so existing databases and language prefs survive.
-    let legacy_dir = base.join("deplock");
-    if !data_dir.exists() && legacy_dir.exists() {
-        if let Err(e) = tokio::fs::rename(&legacy_dir, &data_dir).await {
-            tracing::warn!("Could not migrate legacy data directory: {}", e);
-        } else {
-            tracing::info!("Migrated data directory from deplock/ to deploykeys/");
-            // The -wal/-shm sidecars must move with the DB file: an orphaned
-            // WAL drops un-checkpointed pages and corrupts the database.
-            for suffix in ["", "-wal", "-shm"] {
-                let legacy = data_dir.join(format!("deplock.db{suffix}"));
-                if legacy.exists() {
-                    let _ =
-                        tokio::fs::rename(&legacy, data_dir.join(format!("deploykeys.db{suffix}")))
-                            .await;
-                }
-            }
-        }
-    }
-
     tokio::fs::create_dir_all(&data_dir).await?;
     Ok(data_dir)
 }

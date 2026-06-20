@@ -1,4 +1,4 @@
-# DeployKeys Desktop
+<h1 align="center">DeployKeys Desktop</h1>
 
 <p align="center">
   English | <a href="README-zh-CN.md">简体中文</a>
@@ -167,7 +167,7 @@ The root workspace `default-members` contains only `deploykeys-core` and `deploy
 
 ## Data Location
 
-The runtime database lives under the system app data directory at `deploykeys/deploykeys.db`. On first launch, the app attempts to migrate the legacy `deplock/` data directory.
+The runtime database lives under the system app data directory at `deploykeys/deploykeys.db`.
 
 In debug builds, the default file-backed credential backend stores plaintext credentials in `dev_credentials.json` under the same data directory. This is for development convenience only. Release builds use the system keychain by default.
 

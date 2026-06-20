@@ -17,40 +17,6 @@ pub struct CredentialStore;
 impl CredentialStore {
     const SERVICE_NAME: &'static str = "com.deploykeys.desktop";
 
-    /// Service name used before the project was renamed to DeployKeys.
-    /// Retained only so [`Self::migrate_legacy_entry`] can move old
-    /// credentials into the current namespace on first launch.
-    const LEGACY_SERVICE_NAME: &'static str = "com.deplock.desktop";
-
-    /// Move one credential from the legacy (`com.deplock.desktop`) service
-    /// namespace into the current one.
-    ///
-    /// The reference keys themselves are unchanged by the rename — only the
-    /// service namespace differs — so migration is keyed by `ref_key`.
-    ///
-    /// Best-effort and idempotent: returns `Ok(false)` when the current entry
-    /// already exists or the legacy entry is absent; `Ok(true)` when a secret
-    /// was actually moved. On success the legacy entry is deleted.
-    pub fn migrate_legacy_entry(ref_key: &str) -> Result<bool> {
-        let current = Entry::new(Self::SERVICE_NAME, ref_key)?;
-        if current.get_password().is_ok() {
-            return Ok(false);
-        }
-
-        let legacy = Entry::new(Self::LEGACY_SERVICE_NAME, ref_key)?;
-        match legacy.get_password() {
-            Ok(secret) => {
-                current.set_password(&secret)?;
-                // The secret now lives under the new namespace; drop the old
-                // copy. A failed delete is non-fatal (the new copy is what we
-                // read going forward).
-                let _ = legacy.delete_credential();
-                Ok(true)
-            }
-            Err(_) => Ok(false),
-        }
-    }
-
     /// Store a GitHub token and return the reference key
     pub fn store_token(account_login: &str, token: &str) -> Result<String> {
         validate_login(account_login)?;

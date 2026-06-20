@@ -1,4 +1,4 @@
-# DeployKeys Desktop
+<h1 align="center">DeployKeys Desktop</h1>
 
 <p align="center">
   <a href="README.md">English</a> | 简体中文
@@ -166,7 +166,7 @@ deploykeys-desktop/
 
 ## 数据位置
 
-运行时数据库位于系统应用数据目录下的 `deploykeys/deploykeys.db`。首次启动会尝试迁移旧的 `deplock/` 数据目录。
+运行时数据库位于系统应用数据目录下的 `deploykeys/deploykeys.db`。
 
 开发构建如果使用默认文件凭据后端，明文凭据会写入同一数据目录下的 `dev_credentials.json`。这是开发便利设置，发布构建默认走系统 keychain。
 
