@@ -1103,9 +1103,9 @@ fn CloneTasksDialog(
             <div
                 class=move || {
                     if open.get() {
-                        "w-full max-w-[40rem] h-[min(32rem,calc(100vh-6rem))] bg-surface border border-border rounded-xl shadow-2xl overflow-hidden scale-100 transition-transform duration-300 flex flex-col"
+                        "w-full max-w-[40rem] h-[min(32rem,calc(100vh-6rem))] bg-surface border border-border rounded-xl shadow-2xl overflow-visible scale-100 transition-transform duration-300 flex flex-col"
                     } else {
-                        "w-full max-w-[40rem] h-[min(32rem,calc(100vh-6rem))] bg-surface border border-border rounded-xl shadow-2xl overflow-hidden scale-95 transition-transform duration-300 flex flex-col"
+                        "w-full max-w-[40rem] h-[min(32rem,calc(100vh-6rem))] bg-surface border border-border rounded-xl shadow-2xl overflow-visible scale-95 transition-transform duration-300 flex flex-col"
                     }
                 }
                 on:click=|ev| ev.stop_propagation()
@@ -1119,7 +1119,7 @@ fn CloneTasksDialog(
                         type="button"
                         title=move || t("common.cancel")
                         aria-label=move || t("common.cancel")
-                        class="inline-flex items-center justify-center size-8 rounded-md text-muted hover:bg-bg hover:text-content focus:outline-none"
+                        class="relative z-[60] inline-flex items-center justify-center size-8 rounded-md text-muted hover:bg-bg hover:text-content focus:outline-none"
                         on:click=move |_| open.set(false)
                     >
                         <Icon name=IconName::Close class="size-4" />
@@ -1134,11 +1134,13 @@ fn CloneTasksDialog(
                         prop:value=move || search.get()
                         on:input=move |ev| search.set(event_target_value(&ev))
                     />
-                    <FilterDropdown
-                        options=range_options
-                        selected=Signal::derive(move || range.get())
-                        on_select=Callback::new(move |value| range.set(value))
-                    />
+                    <Show when=move || open.get()>
+                        <FilterDropdown
+                            options=range_options
+                            selected=Signal::derive(move || range.get())
+                            on_select=Callback::new(move |value| range.set(value))
+                        />
+                    </Show>
                 </div>
 
                 <div class="min-h-0 flex-1 overflow-y-auto px-3 py-3">
