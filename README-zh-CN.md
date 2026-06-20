@@ -23,8 +23,8 @@ DeployKeys Desktop 是一个面向 GitHub Deploy Keys 的桌面管理工具。�
 ![alt text](.images/zh-CN/step-4.webp)
 ![alt text](.images/zh-CN/step-5.webp)
 ![alt text](.images/zh-CN/step-6.webp)
-![alt text](.images/zh-CN/step-6.webp)
 ![alt text](.images/zh-CN/step-7.webp)
+![alt text](.images/zh-CN/step-8.webp)
 
 ### 国际化语言
 

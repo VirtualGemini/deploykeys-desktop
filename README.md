@@ -23,8 +23,8 @@ The project is composed of a Rust native core, a Tauri 2 desktop host, and a Lep
 ![alt text](.images/en/step-4.webp)
 ![alt text](.images/en/step-5.webp)
 ![alt text](.images/en/step-6.webp)
-![alt text](.images/en/step-6.webp)
 ![alt text](.images/en/step-7.webp)
+![alt text](.images/en/step-8.webp)
 
 ### language
 
