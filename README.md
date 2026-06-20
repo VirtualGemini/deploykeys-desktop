@@ -1,7 +1,7 @@
 # DeployKeys Desktop
 
 <p align="center">
-  English | <a href="README-zh-CN.md">Simplified Chinese</a>
+  English | <a href="README-zh-CN.md">简体中文</a>
 </p>
 
 <p align="center">
