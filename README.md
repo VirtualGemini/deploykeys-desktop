@@ -13,6 +13,23 @@ DeployKeys Desktop is a desktop manager for GitHub Deploy Keys. It is built arou
 
 The project is composed of a Rust native core, a Tauri 2 desktop host, and a Leptos/wasm frontend. Its goal is to make Deploy Key ownership, private-key location, repository binding, and access verification clear across multiple repositories and deployment targets.
 
+## Related pages
+
+### Help
+
+![alt text](.images/en/step-1.webp)
+![alt text](.images/en/step-2.webp)
+![alt text](.images/en/step-3.webp)
+![alt text](.images/en/step-4.webp)
+![alt text](.images/en/step-5.webp)
+![alt text](.images/en/step-6.webp)
+![alt text](.images/en/step-6.webp)
+![alt text](.images/en/step-7.webp)
+
+### language
+
+![alt text](.images/en/languages.webp)
+
 ## Features
 
 ### GitHub Account And Repository Sync
