@@ -111,12 +111,30 @@
   }
 
   .tutorial-active-target {
+    z-index: 121 !important;
+    pointer-events: none;
+    border-color: transparent !important;
     animation: tutorial-active-target-color 1.25s ease-in-out infinite;
+  }
+
+  .tutorial-active-target:not(.absolute):not(.fixed):not(.sticky):not(.relative) {
+    position: relative;
   }
 
   .tutorial-active-target svg,
   .tutorial-active-target [aria-hidden="true"] {
     animation: tutorial-active-target-color 1.25s ease-in-out infinite;
+  }
+
+  .tutorial-active-target-parent {
+    z-index: 121 !important;
+    pointer-events: none;
+    border-color: transparent !important;
+  }
+
+  .tutorial-active-target-parent > :not(.tutorial-active-target) {
+    opacity: 0.62;
+    filter: blur(0.75px) brightness(0.98);
   }
 
   @keyframes tutorial-active-target-color {

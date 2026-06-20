@@ -824,9 +824,11 @@ fn TutorialGuide(
 
     view! {
         <Show when=move || step.get().is_some()>
-            <div class="pointer-events-none fixed inset-0 z-[90]">
+            <div class="pointer-events-none fixed inset-0">
+                <div class="pointer-events-auto fixed inset-0 z-[120] bg-bg/5 backdrop-blur-[0.75px] backdrop-brightness-98 dark:bg-black/5"></div>
+
                 <div
-                    class="pointer-events-auto fixed z-[92] w-[min(20rem,calc(100vw-2rem))] rounded-lg border border-border bg-surface shadow-2xl"
+                    class="pointer-events-auto fixed z-[130] w-[min(20rem,calc(100vw-2rem))] rounded-lg border border-border bg-surface shadow-2xl"
                     style=move || tutorial_bubble_style(current.get(), target_rect.get())
                 >
                     <div class="flex items-start justify-between gap-3 px-4 pt-4">
@@ -1027,7 +1029,7 @@ fn TutorialReposDemo(step: TutorialStep) -> impl IntoView {
                                                 <Icon name=IconName::MoreVertical class="size-4" />
                                             </button>
                                             <Show when=move || show_more_menu>
-                                                <div class="absolute right-0 top-10 z-20 min-w-28 rounded-lg border border-border bg-surface p-1 shadow-xl">
+                                                <div data-tutorial-target-menu="" class="absolute right-0 top-10 z-[91] min-w-28 rounded-lg border border-border bg-surface p-1 shadow-xl">
                                                     <button
                                                         type="button"
                                                         data-tutorial-target="connect-repo"
@@ -1186,6 +1188,9 @@ fn highlight_tutorial_target(step: TutorialStep) {
     let Some(element) = find_tutorial_target_element(step) else {
         return;
     };
+    if let Ok(Some(menu)) = element.closest("[data-tutorial-target-menu]") {
+        let _ = menu.class_list().add_1("tutorial-active-target-parent");
+    }
     let _ = element.class_list().add_1("tutorial-active-target");
 }
 
@@ -1230,6 +1235,19 @@ fn clear_tutorial_target_highlight() {
             .and_then(|node| node.dyn_into::<web_sys::Element>().ok())
         {
             let _ = element.class_list().remove_1("tutorial-active-target");
+        }
+    }
+    let Ok(parents) = document.query_selector_all(".tutorial-active-target-parent") else {
+        return;
+    };
+    for index in 0..parents.length() {
+        if let Some(element) = parents
+            .item(index)
+            .and_then(|node| node.dyn_into::<web_sys::Element>().ok())
+        {
+            let _ = element
+                .class_list()
+                .remove_1("tutorial-active-target-parent");
         }
     }
 }
