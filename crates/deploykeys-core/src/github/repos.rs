@@ -18,7 +18,8 @@ pub struct RepoOwner {
     pub login: String,
 }
 
-/// A repository as returned by `GET /user/repos`.
+/// A repository as returned by `GET /user/repos` and
+/// `GET /installation/repositories`. Both endpoints use the same repo shape.
 #[derive(Debug, Clone, Deserialize)]
 pub struct GitHubRepository {
     pub id: i64,
@@ -35,10 +36,31 @@ pub struct GitHubRepository {
     pub permissions: serde_json::Value,
 }
 
+/// The `{"total_count": N, "repositories": [...]}` wrapper returned by
+/// `GET /installation/repositories`. Only the inner array is needed.
+#[derive(Debug, Deserialize)]
+struct InstallationRepositoriesResponse {
+    #[serde(default)]
+    repositories: Vec<GitHubRepository>,
+}
+
+/// Fine-grained PATs (`github_pat_...`) are installation tokens: the user's
+/// own repos are invisible to them via `/user/repos`, which returns only the
+/// personal-account repos. They must be listed through the installation
+/// endpoint instead. Classic PATs (`ghp_...`) and OAuth tokens are user tokens
+/// and keep using `/user/repos`.
+fn is_fine_grained_pat(token: &str) -> bool {
+    token.starts_with("github_pat_")
+}
+
 impl GitHubClient {
-    /// List every repository the token can access (owner, collaborator, and
-    /// organization member), across all pages. Progress is reported as pages
-    /// are fetched and, when available, as local persistence proceeds.
+    /// List every repository the token can access, across all pages. Progress
+    /// is reported as pages are fetched and, when available, as local
+    /// persistence proceeds.
+    ///
+    /// Fine-grained PATs are routed to `GET /installation/repositories` (their
+    /// repos are not exposed via `/user/repos`); classic PATs and OAuth tokens
+    /// keep using `GET /user/repos`.
     pub async fn list_user_repos<P: ProgressReporter>(
         &self,
         token: &str,
@@ -48,10 +70,22 @@ impl GitHubClient {
         let mut all = Vec::new();
         progress.report(operation.clone(), 5);
         for page in 1..=MAX_PAGES {
-            let path = format!("/user/repos?per_page={}&page={}", PER_PAGE, page);
-            // `/user/repos` returns a bare array (no wrapper), so stop once a
-            // page comes back shorter than the page size.
-            let repos: Vec<GitHubRepository> = self.request(token, Method::GET, &path).await?;
+            let path = format!(
+                "{}?per_page={}&page={}",
+                endpoint_path(token),
+                PER_PAGE,
+                page
+            );
+            let repos = if is_fine_grained_pat(token) {
+                // `/installation/repositories` wraps the list in an object.
+                let resp: InstallationRepositoriesResponse =
+                    self.request(token, Method::GET, &path).await?;
+                resp.repositories
+            } else {
+                // `/user/repos` returns a bare array (no wrapper).
+                self.request::<Vec<GitHubRepository>>(token, Method::GET, &path)
+                    .await?
+            };
 
             let page_len = repos.len();
             all.extend(repos);
@@ -66,6 +100,15 @@ impl GitHubClient {
             }
         }
         Ok(all)
+    }
+}
+
+/// Pick the listing endpoint based on the token type.
+fn endpoint_path(token: &str) -> &'static str {
+    if is_fine_grained_pat(token) {
+        "/installation/repositories"
+    } else {
+        "/user/repos"
     }
 }
 
@@ -184,5 +227,164 @@ mod tests {
 
         assert!(matches!(error, crate::Error::GitHub(_)));
         assert!(error.to_string().contains("401"));
+    }
+
+    // ---- fine-grained PAT routing -------------------------------------------
+
+    #[test]
+    fn fine_grained_pat_detected_by_prefix() {
+        // GitHub always mints these with the lowercase `github_pat_` prefix.
+        assert!(is_fine_grained_pat("github_pat_11ABCDE0123456789"));
+        assert!(!is_fine_grained_pat("ghp_abcdefghijklmnopqrstuvwxyz"));
+        assert!(!is_fine_grained_pat("gho_abcdefghijklmnopqrstuvwxyz"));
+        assert!(!is_fine_grained_pat("token"));
+    }
+
+    #[test]
+    fn endpoint_path_routes_by_token_type() {
+        assert_eq!(
+            endpoint_path("github_pat_11ABCDE0123456789"),
+            "/installation/repositories"
+        );
+        assert_eq!(endpoint_path("ghp_token"), "/user/repos");
+        assert_eq!(endpoint_path("gho_token"), "/user/repos");
+        assert_eq!(endpoint_path("anything_else"), "/user/repos");
+    }
+
+    #[tokio::test]
+    async fn fine_grained_pat_uses_installation_endpoint() {
+        let mut server = mockito::Server::new_async().await;
+        // A fine-grained PAT must hit `/installation/repositories`, NOT
+        // `/user/repos`. Mock only the installation path so a stray
+        // `/user/repos` call would fail with a 404 -> error.
+        server
+            .mock("GET", "/installation/repositories")
+            .match_query(mockito::Matcher::Any)
+            .match_header("authorization", "Bearer github_pat_11ABCDEF")
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(format!(
+                r#"{{"total_count": 1, "repositories": [{}]}}"#,
+                repo_json(42, "myorg/private-repo")
+            ))
+            .create_async()
+            .await;
+
+        let repos = client_for(&server)
+            .list_user_repos(
+                "github_pat_11ABCDEF",
+                &OperationId::from("test"),
+                &NoOpProgressReporter,
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(repos.len(), 1);
+        assert_eq!(repos[0].full_name, "myorg/private-repo");
+        assert_eq!(repos[0].owner.login, "myorg");
+        assert!(repos[0].private);
+    }
+
+    #[tokio::test]
+    async fn fine_grained_pat_paginates_installation_endpoint() {
+        let mut server = mockito::Server::new_async().await;
+
+        let first_page: Vec<String> = (0..PER_PAGE)
+            .map(|i| repo_json(i as i64, &format!("org/repo{}", i)))
+            .collect();
+        server
+            .mock("GET", "/installation/repositories")
+            .match_query(mockito::Matcher::UrlEncoded("page".into(), "1".into()))
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(format!(
+                r#"{{"total_count": 101, "repositories": [{}]}}"#,
+                first_page.join(",")
+            ))
+            .create_async()
+            .await;
+        server
+            .mock("GET", "/installation/repositories")
+            .match_query(mockito::Matcher::UrlEncoded("page".into(), "2".into()))
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(format!(
+                r#"{{"total_count": 101, "repositories": [{}]}}"#,
+                repo_json(100, "org/repo100")
+            ))
+            .create_async()
+            .await;
+
+        let repos = client_for(&server)
+            .list_user_repos(
+                "github_pat_11ABCDEF",
+                &OperationId::from("test"),
+                &NoOpProgressReporter,
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(repos.len(), 101);
+        assert_eq!(repos[100].full_name, "org/repo100");
+    }
+
+    #[tokio::test]
+    async fn fine_grained_pat_handles_empty_installation() {
+        let mut server = mockito::Server::new_async().await;
+        server
+            .mock("GET", "/installation/repositories")
+            .match_query(mockito::Matcher::Any)
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(r#"{"total_count": 0, "repositories": []}"#)
+            .create_async()
+            .await;
+
+        let repos = client_for(&server)
+            .list_user_repos(
+                "github_pat_11ABCDEF",
+                &OperationId::from("test"),
+                &NoOpProgressReporter,
+            )
+            .await
+            .unwrap();
+
+        assert!(repos.is_empty());
+    }
+
+    #[tokio::test]
+    async fn fine_grained_pat_never_calls_user_repos() {
+        // Guard against regressions: installing a `/user/repos` mock that
+        // would error on any call proves the fine-grained path never falls
+        // back to the wrong endpoint.
+        let mut server = mockito::Server::new_async().await;
+        server
+            .mock("GET", "/user/repos")
+            .match_query(mockito::Matcher::Any)
+            .with_status(404)
+            .with_body(r#"{"message": "should not be called"}"#)
+            .create_async()
+            .await;
+        server
+            .mock("GET", "/installation/repositories")
+            .match_query(mockito::Matcher::Any)
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(format!(
+                r#"{{"total_count": 1, "repositories": [{}]}}"#,
+                repo_json(7, "org/repo")
+            ))
+            .create_async()
+            .await;
+
+        let repos = client_for(&server)
+            .list_user_repos(
+                "github_pat_11ABCDEF",
+                &OperationId::from("test"),
+                &NoOpProgressReporter,
+            )
+            .await
+            .unwrap();
+        assert_eq!(repos.len(), 1);
     }
 }
