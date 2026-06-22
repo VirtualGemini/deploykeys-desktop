@@ -986,7 +986,7 @@ dependencies = [
 
 [[package]]
 name = "deploykeys-app"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "deploykeys-core",
  "dirs 5.0.1",
@@ -1004,7 +1004,7 @@ dependencies = [
 
 [[package]]
 name = "deploykeys-core"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "async-trait",
  "chrono",
@@ -1027,7 +1027,7 @@ dependencies = [
 
 [[package]]
 name = "deploykeys-ui"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "console_error_panic_hook",
  "js-sys",
