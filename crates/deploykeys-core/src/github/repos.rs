@@ -44,13 +44,16 @@ struct InstallationRepositoriesResponse {
     repositories: Vec<GitHubRepository>,
 }
 
-/// Fine-grained PATs (`github_pat_...`) are installation tokens: the user's
-/// own repos are invisible to them via `/user/repos`, which returns only the
-/// personal-account repos. They must be listed through the installation
-/// endpoint instead. Classic PATs (`ghp_...`) and OAuth tokens are user tokens
-/// and keep using `/user/repos`.
-fn is_fine_grained_pat(token: &str) -> bool {
-    token.starts_with("github_pat_")
+/// GitHub App installation tokens (`ghs_...`) are the *only* tokens served by
+/// `GET /installation/repositories`. That endpoint requires an installation
+/// access token and rejects everything else with 403.
+///
+/// Fine-grained PATs (`github_pat_...`) are **personal** tokens: despite the
+/// name, they are NOT installation tokens and must use `GET /user/repos` like
+/// classic PATs (`ghp_...`) and OAuth tokens (`gho_...`). Routing them to the
+/// installation endpoint breaks the personal-PAT sign-in flow.
+fn is_installation_token(token: &str) -> bool {
+    token.starts_with("ghs_")
 }
 
 impl GitHubClient {
@@ -58,9 +61,9 @@ impl GitHubClient {
     /// is reported as pages are fetched and, when available, as local
     /// persistence proceeds.
     ///
-    /// Fine-grained PATs are routed to `GET /installation/repositories` (their
-    /// repos are not exposed via `/user/repos`); classic PATs and OAuth tokens
-    /// keep using `GET /user/repos`.
+    /// GitHub App installation tokens (`ghs_...`) are routed to
+    /// `GET /installation/repositories`; every other token type — classic PATs,
+    /// fine-grained PATs, and OAuth tokens — keeps using `GET /user/repos`.
     pub async fn list_user_repos<P: ProgressReporter>(
         &self,
         token: &str,
@@ -76,7 +79,7 @@ impl GitHubClient {
                 PER_PAGE,
                 page
             );
-            let repos = if is_fine_grained_pat(token) {
+            let repos = if is_installation_token(token) {
                 // `/installation/repositories` wraps the list in an object.
                 let resp: InstallationRepositoriesResponse =
                     self.request(token, Method::GET, &path).await?;
@@ -103,9 +106,11 @@ impl GitHubClient {
     }
 }
 
-/// Pick the listing endpoint based on the token type.
+/// Pick the listing endpoint based on the token type. Only GitHub App
+/// installation tokens (`ghs_...`) use the installation endpoint; every other
+/// token — including fine-grained PATs — uses `/user/repos`.
 fn endpoint_path(token: &str) -> &'static str {
-    if is_fine_grained_pat(token) {
+    if is_installation_token(token) {
         "/installation/repositories"
     } else {
         "/user/repos"
@@ -229,22 +234,32 @@ mod tests {
         assert!(error.to_string().contains("401"));
     }
 
-    // ---- fine-grained PAT routing -------------------------------------------
+    // ---- installation token routing ----------------------------------------
 
     #[test]
-    fn fine_grained_pat_detected_by_prefix() {
-        // GitHub always mints these with the lowercase `github_pat_` prefix.
-        assert!(is_fine_grained_pat("github_pat_11ABCDE0123456789"));
-        assert!(!is_fine_grained_pat("ghp_abcdefghijklmnopqrstuvwxyz"));
-        assert!(!is_fine_grained_pat("gho_abcdefghijklmnopqrstuvwxyz"));
-        assert!(!is_fine_grained_pat("token"));
+    fn installation_token_detected_by_prefix() {
+        // Only `ghs_` tokens are GitHub App installation tokens.
+        assert!(is_installation_token("ghs_abcdefghijklmnopqrstuvwxyz"));
+        // Fine-grained PATs are personal tokens, NOT installation tokens.
+        assert!(!is_installation_token("github_pat_11ABCDE0123456789"));
+        assert!(!is_installation_token("ghp_abcdefghijklmnopqrstuvwxyz"));
+        assert!(!is_installation_token("gho_abcdefghijklmnopqrstuvwxyz"));
+        assert!(!is_installation_token("token"));
     }
 
     #[test]
     fn endpoint_path_routes_by_token_type() {
+        // Only installation tokens reach the installation endpoint.
+        assert_eq!(
+            endpoint_path("ghs_abcdefghijklmnopqrstuvwxyz"),
+            "/installation/repositories"
+        );
+        // Every other token type — including fine-grained PATs — uses
+        // /user/repos. This is the regression guard: routing fine-grained
+        // PATs to /installation/repositories 403s on GitHub.
         assert_eq!(
             endpoint_path("github_pat_11ABCDE0123456789"),
-            "/installation/repositories"
+            "/user/repos"
         );
         assert_eq!(endpoint_path("ghp_token"), "/user/repos");
         assert_eq!(endpoint_path("gho_token"), "/user/repos");
@@ -252,15 +267,15 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn fine_grained_pat_uses_installation_endpoint() {
+    async fn installation_token_uses_installation_endpoint() {
         let mut server = mockito::Server::new_async().await;
-        // A fine-grained PAT must hit `/installation/repositories`, NOT
+        // An installation token must hit `/installation/repositories`, NOT
         // `/user/repos`. Mock only the installation path so a stray
         // `/user/repos` call would fail with a 404 -> error.
         server
             .mock("GET", "/installation/repositories")
             .match_query(mockito::Matcher::Any)
-            .match_header("authorization", "Bearer github_pat_11ABCDEF")
+            .match_header("authorization", "Bearer ghs_installtoken")
             .with_status(200)
             .with_header("content-type", "application/json")
             .with_body(format!(
@@ -272,7 +287,7 @@ mod tests {
 
         let repos = client_for(&server)
             .list_user_repos(
-                "github_pat_11ABCDEF",
+                "ghs_installtoken",
                 &OperationId::from("test"),
                 &NoOpProgressReporter,
             )
@@ -286,7 +301,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn fine_grained_pat_paginates_installation_endpoint() {
+    async fn installation_token_paginates_installation_endpoint() {
         let mut server = mockito::Server::new_async().await;
 
         let first_page: Vec<String> = (0..PER_PAGE)
@@ -317,7 +332,7 @@ mod tests {
 
         let repos = client_for(&server)
             .list_user_repos(
-                "github_pat_11ABCDEF",
+                "ghs_installtoken",
                 &OperationId::from("test"),
                 &NoOpProgressReporter,
             )
@@ -329,7 +344,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn fine_grained_pat_handles_empty_installation() {
+    async fn installation_token_handles_empty_installation() {
         let mut server = mockito::Server::new_async().await;
         server
             .mock("GET", "/installation/repositories")
@@ -342,7 +357,7 @@ mod tests {
 
         let repos = client_for(&server)
             .list_user_repos(
-                "github_pat_11ABCDEF",
+                "ghs_installtoken",
                 &OperationId::from("test"),
                 &NoOpProgressReporter,
             )
@@ -353,9 +368,9 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn fine_grained_pat_never_calls_user_repos() {
+    async fn installation_token_never_calls_user_repos() {
         // Guard against regressions: installing a `/user/repos` mock that
-        // would error on any call proves the fine-grained path never falls
+        // would error on any call proves the installation path never falls
         // back to the wrong endpoint.
         let mut server = mockito::Server::new_async().await;
         server
@@ -379,12 +394,44 @@ mod tests {
 
         let repos = client_for(&server)
             .list_user_repos(
-                "github_pat_11ABCDEF",
+                "ghs_installtoken",
                 &OperationId::from("test"),
                 &NoOpProgressReporter,
             )
             .await
             .unwrap();
         assert_eq!(repos.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn fine_grained_pat_uses_user_repos_not_installation() {
+        // Regression guard: fine-grained PATs are personal tokens and must go
+        // through `/user/repos`. Routing them to `/installation/repositories`
+        // gets a 403 from GitHub ("must authenticate with an installation
+        // access token"). Mock only `/user/repos`; a stray call to the
+        // installation endpoint would hit no mock and error out.
+        let mut server = mockito::Server::new_async().await;
+        server
+            .mock("GET", "/user/repos")
+            .match_query(mockito::Matcher::Any)
+            .match_header("authorization", "Bearer github_pat_11ABCDEF")
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(format!("[{}]", repo_json(9, "me/my-repo")))
+            .create_async()
+            .await;
+
+        let repos = client_for(&server)
+            .list_user_repos(
+                "github_pat_11ABCDEF",
+                &OperationId::from("test"),
+                &NoOpProgressReporter,
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(repos.len(), 1);
+        assert_eq!(repos[0].full_name, "me/my-repo");
+        assert_eq!(repos[0].owner.login, "me");
     }
 }
