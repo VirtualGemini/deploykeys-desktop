@@ -257,10 +257,7 @@ mod tests {
         // Every other token type — including fine-grained PATs — uses
         // /user/repos. This is the regression guard: routing fine-grained
         // PATs to /installation/repositories 403s on GitHub.
-        assert_eq!(
-            endpoint_path("github_pat_11ABCDE0123456789"),
-            "/user/repos"
-        );
+        assert_eq!(endpoint_path("github_pat_11ABCDE0123456789"), "/user/repos");
         assert_eq!(endpoint_path("ghp_token"), "/user/repos");
         assert_eq!(endpoint_path("gho_token"), "/user/repos");
         assert_eq!(endpoint_path("anything_else"), "/user/repos");
