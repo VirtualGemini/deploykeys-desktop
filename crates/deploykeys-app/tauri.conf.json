@@ -8,11 +8,11 @@
     "devUrl": "http://localhost:8000",
     "beforeDevCommand": {
       "cwd": "../deploykeys-ui",
-      "script": "NO_COLOR=false trunk serve --port 8000"
+      "script": "trunk serve --port 8000"
     },
     "beforeBuildCommand": {
       "cwd": "../deploykeys-ui",
-      "script": "NO_COLOR=false trunk build --release"
+      "script": "trunk build --release"
     }
   },
   "app": {
@@ -25,13 +25,7 @@
         "height": 570,
         "minWidth": 800,
         "minHeight": 570,
-        "resizable": true,
-        "titleBarStyle": "Overlay",
-        "hiddenTitle": true,
-        "trafficLightPosition": {
-          "x": 16,
-          "y": 29.5
-        }
+        "resizable": true
       }
     ],
     "security": {

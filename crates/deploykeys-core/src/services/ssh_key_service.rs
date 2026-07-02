@@ -542,6 +542,8 @@ fn detect_os() -> crate::models::OsType {
         crate::models::OsType::MacOs
     } else if cfg!(target_os = "linux") {
         crate::models::OsType::Linux
+    } else if cfg!(target_os = "windows") {
+        crate::models::OsType::Windows
     } else {
         crate::models::OsType::Unknown
     }

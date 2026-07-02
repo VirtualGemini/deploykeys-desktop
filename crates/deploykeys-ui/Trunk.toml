@@ -10,5 +10,5 @@ stage = "pre_build"
 command = "sh"
 command_arguments = [
     "-c",
-    "../../tools/tailwindcss -i styles/input.css -o styles/output.css --minify",
+    "if [ -x ../../tools/tailwindcss ]; then ../../tools/tailwindcss -i styles/input.css -o styles/output.css --minify; else ../../tools/tailwindcss.exe -i styles/input.css -o styles/output.css --minify; fi",
 ]

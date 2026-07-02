@@ -52,8 +52,8 @@ const LOCAL_GIT_CONFIG_REMOTE_KEY: &str = "deploykeys.remote-url";
 struct AppState {
     db: Database,
     /// The active session's GitHub access token, cached in memory so repeated
-    /// operations (e.g. repo sync) don't re-read the OS keyring — each keyring
-    /// read can trigger a macOS keychain trust prompt. Populated on sign-in and
+    /// operations (e.g. repo sync) don't re-read the OS credential store. Reads
+    /// can trigger platform trust prompts. Populated on sign-in and
     /// lazily on first read; cleared on sign-out.
     token: Mutex<Option<String>>,
     clone_tasks: Arc<Mutex<Vec<CloneTaskDto>>>,
@@ -1117,7 +1117,7 @@ async fn test_repository_remote(
 
     let ssh_command = format!(
         "ssh -i {} -o IdentitiesOnly=yes -o BatchMode=yes -o ConnectTimeout=10",
-        shell_quote(&binding.private_key_path)
+        shell_arg(&binding.private_key_path)
     );
     let args = vec![
         "-C".to_string(),
@@ -1359,7 +1359,7 @@ async fn ensure_key_belongs_to_active_target(
 
 /// Get the active session's access token: from the in-memory cache if present,
 /// otherwise read it once from the keyring and cache it. A keyring read can
-/// trigger a macOS keychain prompt; surfacing a clear message here is what makes
+/// trigger an OS credential prompt; surfacing a clear message here is what makes
 /// a denied prompt visible instead of a silent failure.
 async fn resolve_token(state: &AppState, account: &Account) -> Result<String, String> {
     if let Some(token) = state.cached_token() {
@@ -1371,10 +1371,8 @@ async fn resolve_token(state: &AppState, account: &Account) -> Result<String, St
         .await
         .map_err(|e| format!("Keyring task failed: {e}"))?
         .map_err(|e| {
-            tracing::error!("Could not read login token from keychain: {}", e);
-            format!(
-                "无法读取登录凭证：{e}。如果系统弹出钥匙串访问提示，请选择「允许」或「始终允许」。"
-            )
+            tracing::error!("Could not read login token from credential store: {}", e);
+            format!("无法读取登录凭证：{e}。如果系统弹出凭据访问提示，请选择允许。")
         })?;
 
     state.cache_token(token.clone());
@@ -1809,11 +1807,17 @@ fn path_arg(path: &Path) -> String {
     path.to_string_lossy().to_string()
 }
 
-fn shell_quote(value: &str) -> String {
+#[cfg(not(target_os = "windows"))]
+fn shell_arg(value: &str) -> String {
     if value.is_empty() {
         return "''".to_string();
     }
     format!("'{}'", value.replace('\'', "'\\''"))
+}
+
+#[cfg(target_os = "windows")]
+fn shell_arg(value: &str) -> String {
+    format!("\"{}\"", value.replace('"', "\\\""))
 }
 
 async fn run_git_clone_task(
@@ -2309,7 +2313,7 @@ pub fn run() {
 /// Whether to store credentials in a plaintext file instead of the OS keyring.
 ///
 /// Defaults to file-backed in debug builds (so `cargo tauri dev`'s unstable
-/// ad-hoc signature does not trigger endless macOS keychain trust prompts) and
+/// ad-hoc signature does not trigger endless OS credential trust prompts) and
 /// keyring in release. Override either way with
 /// `DEPLOYKEYS_CREDENTIALS_BACKEND=file|keychain`.
 fn use_file_credentials() -> bool {
@@ -2324,7 +2328,7 @@ fn use_file_credentials() -> bool {
 }
 
 /// Install the dev file-backed credential store when enabled. No-op otherwise
-/// (the keyring crate's platform default — macOS Keychain — stays in effect).
+/// (the keyring crate's platform default stays in effect).
 fn install_credential_backend(data_dir: &std::path::Path) {
     if !use_file_credentials() {
         return;

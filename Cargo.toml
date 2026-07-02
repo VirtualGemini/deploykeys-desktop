@@ -44,7 +44,7 @@ russh-keys = "0.45"
 ssh-key = { version = "0.6", features = ["ed25519", "p256", "p384", "p521", "std"] }
 
 # System credentials
-keyring = { version = "3.2", features = ["apple-native", "linux-native"] }
+keyring = { version = "3.2", features = ["apple-native", "linux-native", "windows-native"] }
 
 # Logging
 tracing = "0.1"

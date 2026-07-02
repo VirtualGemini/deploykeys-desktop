@@ -9,6 +9,7 @@ pub mod file_store;
 /// Credentials are stored in:
 /// - macOS: Keychain
 /// - Linux: Secret Service / libsecret
+/// - Windows: Windows Credential Manager
 ///
 /// # Security
 /// - Never stores credentials in SQLite or plain files
