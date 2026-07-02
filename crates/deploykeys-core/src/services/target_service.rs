@@ -414,6 +414,8 @@ impl TargetService {
             OsType::MacOs
         } else if os.contains("linux") {
             OsType::Linux
+        } else if os.contains("mingw") || os.contains("msys") || os.contains("windows") {
+            OsType::Windows
         } else {
             OsType::Unknown
         };
@@ -428,6 +430,8 @@ fn detect_os() -> OsType {
         OsType::MacOs
     } else if cfg!(target_os = "linux") {
         OsType::Linux
+    } else if cfg!(target_os = "windows") {
+        OsType::Windows
     } else {
         OsType::Unknown
     }

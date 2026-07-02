@@ -10,13 +10,14 @@ set -eu
 
 VERSION="v4.3.0"
 DEST_DIR="$(cd "$(dirname "$0")" && pwd)"
-DEST="$DEST_DIR/tailwindcss"
-
-case "$(uname -s)" in
-    Darwin) os="macos" ;;
-    Linux)  os="linux" ;;
-    *) echo "unsupported OS: $(uname -s)" >&2; exit 1 ;;
+uname_s="$(uname -s)"
+case "$uname_s" in
+    Darwin) os="macos"; ext="" ;;
+    Linux)  os="linux"; ext="" ;;
+    MINGW*|MSYS*|CYGWIN*) os="windows"; ext=".exe" ;;
+    *) echo "unsupported OS: $uname_s" >&2; exit 1 ;;
 esac
+DEST="$DEST_DIR/tailwindcss$ext"
 
 case "$(uname -m)" in
     arm64|aarch64) arch="arm64" ;;
@@ -24,7 +25,7 @@ case "$(uname -m)" in
     *) echo "unsupported arch: $(uname -m)" >&2; exit 1 ;;
 esac
 
-asset="tailwindcss-${os}-${arch}"
+asset="tailwindcss-${os}-${arch}${ext}"
 
 # sha256 checksums from the official v4.3.0 release sha256sums.txt.
 case "$asset" in
@@ -32,6 +33,7 @@ case "$asset" in
     tailwindcss-macos-x64)   sum="2ba252f770817091e6d0d12a84e0dd531bcc29aad1bfd9d976a3aff1a071b67a" ;;
     tailwindcss-linux-arm64) sum="8f48dcb72be3b351c10563c5329b4638ba8516820dc3b3a1609625a166e87cbd" ;;
     tailwindcss-linux-x64)   sum="73f0e5459054e5cfaa8ab6f3b940f3fbe0f13cc7fd83bc24e7c655033c203400" ;;
+    tailwindcss-windows-x64.exe) sum="" ;;
     *) echo "no checksum for $asset" >&2; exit 1 ;;
 esac
 
@@ -48,6 +50,20 @@ checksum() {
         sha256sum "$1" | cut -d' ' -f1
     fi
 }
+
+release_checksum() {
+    curl -fSL --no-progress-meter --proto '=https' --tlsv1.2 \
+        "https://github.com/tailwindlabs/tailwindcss/releases/download/${VERSION}/sha256sums.txt" |
+        awk -v asset="$asset" '$2 == asset { print $1 }'
+}
+
+if [ -z "$sum" ]; then
+    sum="$(release_checksum)"
+    if [ -z "$sum" ]; then
+        echo "could not find checksum for $asset in ${VERSION} sha256sums.txt" >&2
+        exit 1
+    fi
+fi
 
 # Skip the download entirely if a verified binary is already installed.
 if [ -f "$DEST" ] && [ "$(checksum "$DEST")" = "$sum" ]; then

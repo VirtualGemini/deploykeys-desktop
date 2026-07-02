@@ -1,0 +1,21 @@
+{
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "DeployKeys Desktop",
+        "width": 900,
+        "height": 570,
+        "minWidth": 800,
+        "minHeight": 570,
+        "resizable": true,
+        "titleBarStyle": "Overlay",
+        "hiddenTitle": true,
+        "trafficLightPosition": {
+          "x": 16,
+          "y": 29.5
+        }
+      }
+    ]
+  }
+}

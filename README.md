@@ -82,8 +82,9 @@ The project is composed of a Rust native core, a Tauri 2 desktop host, and a Lep
 - Release builds use the system credential store by default:
   - macOS: Keychain
   - Linux: Secret Service / libsecret
+  - Windows: Windows Credential Manager
 - SQLite stores only token/password reference keys, not plaintext GitHub tokens.
-- Debug builds use a file-backed credential store by default to avoid repeated macOS Keychain prompts from ad-hoc development signatures. Set `DEPLOYKEYS_CREDENTIALS_BACKEND=keychain` to force the system keychain.
+- Debug builds use a file-backed credential store by default to avoid repeated OS credential prompts from ad-hoc development signatures. Set `DEPLOYKEYS_CREDENTIALS_BACKEND=keychain` to force the system credential store.
 - Remote server passwords are stored through the credential backend. SSH-key authentication stores only the private-key file path.
 - Private keys generated on remote targets stay on those servers.
 - Local private-key directories are set to `0700` when possible, and private key files are written with restricted permissions.
@@ -105,12 +106,14 @@ The sign-in flow uses a fine-grained Personal Access Token. Recommended token se
 ## Requirements
 
 - Rust 1.75+
-- macOS 10.15+ or Linux x86_64/arm64
+- macOS 10.15+, Linux x86_64/arm64, or Windows 10/11 x64
 - Git and OpenSSH client
 - `sqlite3` CLI for the SQLx compile-time check database
 - `wasm32-unknown-unknown` target
 - Trunk
 - Tauri CLI v2
+- A POSIX shell such as Git Bash/MSYS when using the bundled Tailwind installer
+  or `make` targets on Windows
 
 Remote servers used for key generation or clone operations also need:
 
@@ -140,6 +143,10 @@ make run
 ```
 
 Tauri starts the Trunk dev server from `crates/deploykeys-ui` and opens the desktop window. The frontend dev server defaults to port `8000`.
+
+On Windows, run the shell-based setup commands from Git Bash/MSYS, or run the
+equivalent `cargo` and `trunk` commands directly from PowerShell after installing
+the Tailwind CLI into `tools/tailwindcss.exe`.
 
 ## Common Commands
 
@@ -186,7 +193,7 @@ The root workspace `default-members` contains only `deploykeys-core` and `deploy
 
 The runtime database lives under the system app data directory at `deploykeys/deploykeys.db`.
 
-In debug builds, the default file-backed credential backend stores plaintext credentials in `dev_credentials.json` under the same data directory. This is for development convenience only. Release builds use the system keychain by default.
+In debug builds, the default file-backed credential backend stores plaintext credentials in `dev_credentials.json` under the same data directory. This is for development convenience only. Release builds use the system credential store by default.
 
 ## Internationalization
 

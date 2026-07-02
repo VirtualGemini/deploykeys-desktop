@@ -74,8 +74,13 @@ fn target_type_roundtrip() {
 
 #[test]
 fn os_type_roundtrip() {
-    assert_roundtrip(&[OsType::MacOs, OsType::Linux, OsType::Unknown]);
-    assert!(OsType::from_str("windows").is_err());
+    assert_roundtrip(&[
+        OsType::MacOs,
+        OsType::Linux,
+        OsType::Windows,
+        OsType::Unknown,
+    ]);
+    assert!(OsType::from_str("freebsd").is_err());
 }
 
 #[test]

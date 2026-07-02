@@ -29,6 +29,7 @@ pub enum TargetType {
 pub enum OsType {
     MacOs,
     Linux,
+    Windows,
     Unknown,
 }
 
@@ -72,6 +73,7 @@ impl std::fmt::Display for OsType {
         match self {
             OsType::MacOs => write!(f, "macos"),
             OsType::Linux => write!(f, "linux"),
+            OsType::Windows => write!(f, "windows"),
             OsType::Unknown => write!(f, "unknown"),
         }
     }
@@ -84,6 +86,7 @@ impl std::str::FromStr for OsType {
         match s {
             "macos" => Ok(OsType::MacOs),
             "linux" => Ok(OsType::Linux),
+            "windows" => Ok(OsType::Windows),
             "unknown" => Ok(OsType::Unknown),
             _ => Err(format!("Invalid os type: {}", s)),
         }
