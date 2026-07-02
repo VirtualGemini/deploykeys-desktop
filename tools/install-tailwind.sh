@@ -54,7 +54,27 @@ checksum() {
 release_checksum() {
     curl -fSL --no-progress-meter --proto '=https' --tlsv1.2 \
         "https://github.com/tailwindlabs/tailwindcss/releases/download/${VERSION}/sha256sums.txt" |
-        awk -v asset="$asset" '$2 == asset { print $1 }'
+        awk -v asset="$asset" '
+            {
+                matched = 0
+                for (i = 1; i <= NF; i++) {
+                    name = $i
+                    sub(/^\*/, "", name)
+                    sub(/^\.\//, "", name)
+                    if (name == asset) {
+                        matched = 1
+                    }
+                }
+                if (matched) {
+                    for (i = 1; i <= NF; i++) {
+                        if ($i ~ /^[0-9a-fA-F]{64}$/) {
+                            print $i
+                            exit
+                        }
+                    }
+                }
+            }
+        '
 }
 
 if [ -z "$sum" ]; then
